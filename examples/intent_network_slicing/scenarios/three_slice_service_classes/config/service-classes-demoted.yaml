@@ -1,0 +1,19 @@
+enabled: true
+root_rate: 1000mbit
+default_rate: 20mbit
+default_ceil: 50mbit
+
+background_subnet: 10.46.10.0/24
+background_rate: 900mbit
+background_ceil: 950mbit
+background_delay_ms: 2
+
+premium_subnet: 10.46.20.0/24
+premium_rate: 70mbit
+premium_ceil: 100mbit
+premium_delay_ms: 35
+
+control_subnet: 10.46.30.0/24
+control_rate: 300mbit
+control_ceil: 400mbit
+control_delay_ms: 8

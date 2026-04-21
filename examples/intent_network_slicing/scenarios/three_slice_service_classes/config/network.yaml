@@ -1,0 +1,35 @@
+# Open5GS Network Configuration (file-based, no MongoDB)
+plmn:
+  mcc: "999"
+  mnc: "70"
+
+amf:
+  region_id: 2
+  set_id: 1
+  tac: 1
+
+network_name:
+  full: Open5GS Test Network
+  short: Open5GS
+
+dns:
+  primary: "8.8.8.8"
+  secondary: "8.8.4.4"
+
+session:
+  subnet: "10.46.0.0/16"
+  gateway: "10.46.0.1"
+
+slices:
+  - sst: 1
+    sd: "0x000001"
+    name: eMBB
+    description: Best-effort background traffic
+  - sst: 1
+    sd: "0x000002"
+    name: premium_vr
+    description: Premium low-latency traffic class
+  - sst: 1
+    sd: "0x000003"
+    name: protected_control
+    description: Protected control traffic class

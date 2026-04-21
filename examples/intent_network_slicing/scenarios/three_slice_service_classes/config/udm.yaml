@@ -1,0 +1,19 @@
+logger:
+  level: info
+  file: /opt/open5gs/var/log/open5gs/udm.log
+
+sbi:
+  server:
+    no_tls: true
+  client:
+    no_tls: true
+
+nrf:
+  sbi:
+    - addr: nrf
+      port: 7777
+
+udm:
+  sbi:
+    - addr: udm
+      port: 7777

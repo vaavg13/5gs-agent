@@ -1,0 +1,25 @@
+logger:
+  level: info
+  file: /opt/open5gs/var/log/open5gs/nssf.log
+
+sbi:
+  server:
+    no_tls: true
+  client:
+    no_tls: true
+
+nrf:
+  sbi:
+    - addr: nrf
+      port: 7777
+
+nssf:
+  sbi:
+    - addr: nssf
+      port: 7777
+  nsi:
+    - addr: nrf
+      port: 7777
+      s_nssai:
+        sst: 1
+        sd: 000001

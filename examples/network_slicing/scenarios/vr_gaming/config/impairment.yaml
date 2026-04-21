@@ -1,0 +1,11 @@
+# Easy difficulty impairment profile
+# Impact: Latency slightly exceeds 10ms threshold
+# Expected score: ~0.80 (1 of 5 metrics fail)
+# Diagnosis: Agent must discover tc is involved
+# Fix: Remove traffic control rules
+
+name: easy_degradation
+tbf_enabled: false
+netem_enabled: true
+delay_ms: 15
+jitter_ms: 3

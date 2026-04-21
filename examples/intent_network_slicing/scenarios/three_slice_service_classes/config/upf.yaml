@@ -1,0 +1,24 @@
+logger:
+  level: info
+  file: /opt/open5gs/var/log/open5gs/upf.log
+
+upf:
+  pfcp:
+    - addr: 0.0.0.0
+      port: 8805
+
+  gtpu:
+    - addr: 0.0.0.0
+      advertise: upf
+
+  subnet:
+    - addr: 10.46.10.1/24
+      dnn: background
+    - addr: 10.46.20.1/24
+      dnn: premium
+    - addr: 10.46.30.1/24
+      dnn: control
+
+  metrics:
+    - addr: 0.0.0.0
+      port: 9092

@@ -1,0 +1,21 @@
+subscribers:
+- imsi: '999700000000001'
+  status: active
+  k: 465B5CE8B199B49FAA5F0A2EE238A6BC
+  opc: E8ED289DEBA952E4283B54E88E6183CA
+  amf: '8000'
+  sqn: '000000000000'
+  apn: internet
+  sst: 1
+  sd: '000001'
+  description: Default test subscriber
+- imsi: '999700000000002'
+  status: active
+  k: 465B5CE8B199B49FAA5F0A2EE238A6BD
+  opc: E8ED289DEBA952E4283B54E88E6183CB
+  amf: '8000'
+  sqn: '000000000000'
+  apn: internet
+  sst: 1
+  sd: '0x000001'
+  description: Secondary test subscriber

@@ -1,0 +1,361 @@
+# Open5GS 5G SA Stack - Full Deployment
+# 11 core NFs (NRF, AMF, SMF, UPF, AUSF, UDM, UDR, PCF, BSF, NSSF) + UERANSIM (gNB + UE) + MongoDB
+#
+# Usage: docker compose -f compose.yaml up -d
+# With observability: docker compose --profile observability up -d
+#
+# Multi-instance (parallel stacks):
+#   PROMETHEUS_PORT=9093 docker compose -p stack2 --profile observability up -d
+#
+# Metrics: AMF:9090, SMF:9091 (internal only, scraped by Prometheus when observability profile is active)
+
+services:
+  # ============ Database ============
+
+  mongo:
+    image: mongo:6.0
+    hostname: mongo
+    volumes:
+      - mongo_data:/data/db
+      - ./scripts:/scripts:ro
+    networks:
+      - open5gs
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # ============ Subscriber Provisioning ============
+
+  mongo-init:
+    image: python:3.11-slim
+    depends_on:
+      mongo:
+        condition: service_healthy
+    volumes:
+      - ./scripts:/scripts:ro
+      - ./config/subscribers.yaml:/etc/open5gs/subscribers.yaml:ro
+    command: ["python", "/scripts/init-mongo-subscribers.py"]
+    environment:
+      - MONGO_HOST=mongo
+      - MONGO_DB=open5gs
+    networks:
+      - open5gs
+
+  # ============ 5G Core Network Functions ============
+
+  nrf:
+    image: openverso/open5gs:2.6.4
+    hostname: nrf
+    restart: unless-stopped
+    command: open5gs-nrfd
+    volumes:
+      - ./config/nrf.yaml:/opt/open5gs/etc/open5gs/nrf.yaml
+    networks:
+      - open5gs
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf --http2-prior-knowledge http://localhost:7777/nnrf-nfm/v1/nf-instances || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+      start_period: 5s
+
+  amf:
+    image: openverso/open5gs:2.6.4
+    hostname: amf
+    x-default: true
+    restart: unless-stopped
+    entrypoint: ["/bin/bash", "/scripts/entrypoint-nf.sh", "/opt/open5gs/etc/open5gs/amf.yaml", "amf", "open5gs-amfd"]
+    depends_on:
+      nrf:
+        condition: service_healthy
+    volumes:
+      - ./config/amf.yaml:/opt/open5gs/etc/open5gs/amf.yaml
+      - ./config/network.yaml:/etc/open5gs/network.yaml
+      - ./config/subscribers.yaml:/etc/open5gs/subscribers.yaml
+      - ./scripts:/scripts:ro
+    # Metrics port 9090 accessible internally via Docker network (no external exposure to avoid port conflicts)
+    networks:
+      - open5gs
+    healthcheck:
+      test: ["CMD-SHELL", "grep -q 38412 /proc/net/sctp/eps"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+      start_period: 10s
+
+  upf:
+    image: openverso/open5gs:2.6.4
+    hostname: upf
+    restart: unless-stopped
+    entrypoint: ["/bin/bash", "/scripts/entrypoint-upf.sh"]
+    privileged: true
+    depends_on:
+      nrf:
+        condition: service_healthy
+    volumes:
+      - ./config/upf.yaml:/opt/open5gs/etc/open5gs/upf.yaml
+      - ./scripts:/scripts:ro
+      - ./config/impairment.yaml:/etc/open5gs/impairment.yaml:ro
+      - ./config/service-classes.yaml:/etc/open5gs/service-classes.yaml:ro
+      - ./config/service-classes-demoted.yaml:/etc/open5gs/service-classes-demoted.yaml:ro
+      - ./config/service-classes-lossy-premium.yaml:/etc/open5gs/service-classes-lossy-premium.yaml:ro
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun
+    sysctls:
+      - net.ipv4.ip_forward=1
+    networks:
+      - open5gs
+    healthcheck:
+      test: ["CMD-SHELL", "ip link show ogstun 2>/dev/null || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+      start_period: 10s
+
+  smf:
+    image: openverso/open5gs:2.6.4
+    hostname: smf
+    restart: unless-stopped
+    entrypoint: ["/bin/bash", "/scripts/entrypoint-smf.sh"]
+    depends_on:
+      nrf:
+        condition: service_healthy
+      upf:
+        condition: service_started
+    volumes:
+      - ./config/smf.yaml:/opt/open5gs/etc/open5gs/smf.yaml
+      - ./scripts:/scripts:ro
+    # Metrics port 9091 accessible internally via Docker network (no external exposure to avoid port conflicts)
+    networks:
+      - open5gs
+    healthcheck:
+      test: ["CMD-SHELL", "netstat -ulnp 2>/dev/null | grep -q 8805 || ss -ulnp | grep -q 8805"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+      start_period: 30s
+
+  ausf:
+    image: openverso/open5gs:2.6.4
+    hostname: ausf
+    restart: unless-stopped
+    entrypoint: ["/bin/bash", "/scripts/entrypoint-nf.sh", "/opt/open5gs/etc/open5gs/ausf.yaml", "ausf", "open5gs-ausfd"]
+    depends_on:
+      nrf:
+        condition: service_healthy
+    volumes:
+      - ./config/ausf.yaml:/opt/open5gs/etc/open5gs/ausf.yaml
+      - ./scripts:/scripts:ro
+    networks:
+      - open5gs
+
+  udm:
+    image: openverso/open5gs:2.6.4
+    hostname: udm
+    restart: unless-stopped
+    entrypoint: ["/bin/bash", "/scripts/entrypoint-nf.sh", "/opt/open5gs/etc/open5gs/udm.yaml", "udm", "open5gs-udmd"]
+    depends_on:
+      nrf:
+        condition: service_healthy
+    volumes:
+      - ./config/udm.yaml:/opt/open5gs/etc/open5gs/udm.yaml
+      - ./scripts:/scripts:ro
+    networks:
+      - open5gs
+
+  udr:
+    image: openverso/open5gs:2.6.4
+    hostname: udr
+    restart: unless-stopped
+    entrypoint: ["/bin/bash", "/scripts/entrypoint-nf.sh", "/opt/open5gs/etc/open5gs/udr.yaml", "udr", "open5gs-udrd"]
+    depends_on:
+      nrf:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+      mongo-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./config/udr.yaml:/opt/open5gs/etc/open5gs/udr.yaml
+      - ./scripts:/scripts:ro
+    networks:
+      - open5gs
+
+  pcf:
+    image: openverso/open5gs:2.6.4
+    hostname: pcf
+    restart: unless-stopped
+    entrypoint: ["/bin/bash", "/scripts/entrypoint-nf.sh", "/opt/open5gs/etc/open5gs/pcf.yaml", "pcf", "open5gs-pcfd"]
+    depends_on:
+      nrf:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+    volumes:
+      - ./config/pcf.yaml:/opt/open5gs/etc/open5gs/pcf.yaml
+      - ./scripts:/scripts:ro
+    networks:
+      - open5gs
+
+  bsf:
+    image: openverso/open5gs:2.6.4
+    hostname: bsf
+    restart: unless-stopped
+    entrypoint: ["/bin/bash", "/scripts/entrypoint-nf.sh", "/opt/open5gs/etc/open5gs/bsf.yaml", "bsf", "open5gs-bsfd"]
+    depends_on:
+      nrf:
+        condition: service_healthy
+    volumes:
+      - ./config/bsf.yaml:/opt/open5gs/etc/open5gs/bsf.yaml
+      - ./scripts:/scripts:ro
+    networks:
+      - open5gs
+
+  nssf:
+    image: openverso/open5gs:2.6.4
+    hostname: nssf
+    restart: unless-stopped
+    entrypoint: ["/bin/bash", "/scripts/entrypoint-nf.sh", "/opt/open5gs/etc/open5gs/nssf.yaml", "nssf", "open5gs-nssfd"]
+    depends_on:
+      nrf:
+        condition: service_healthy
+    volumes:
+      - ./config/nssf.yaml:/opt/open5gs/etc/open5gs/nssf.yaml
+      - ./scripts:/scripts:ro
+    networks:
+      - open5gs
+
+  # ============ iperf3 Server ============
+
+  iperf3-server:
+    image: networkstatic/iperf3:latest
+    hostname: iperf3-server
+    restart: unless-stopped
+    command: ["-s"]
+    networks:
+      - open5gs
+
+  # ============ UERANSIM ============
+
+  gnb:
+    image: free5gc/ueransim:latest
+    platform: linux/amd64
+    hostname: gnb
+    restart: unless-stopped
+    entrypoint: ["/bin/bash", "/scripts/entrypoint-gnb.sh"]
+    depends_on:
+      amf:
+        condition: service_healthy
+    volumes:
+      - ./config/gnb.yaml:/etc/ueransim/gnb.yaml
+      - ./scripts:/scripts:ro
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - NET_BIND_SERVICE
+    devices:
+      - /dev/net/tun
+    sysctls:
+      - net.ipv4.ip_forward=1
+    networks:
+      - open5gs
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f nr-gnb || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+      start_period: 30s
+
+  ue_premium:
+    image: free5gc/ueransim:latest
+    platform: linux/amd64
+    hostname: ue-premium
+    restart: unless-stopped
+    entrypoint: ["/bin/bash", "/scripts/entrypoint-ue.sh"]
+    depends_on:
+      gnb:
+        condition: service_healthy
+    volumes:
+      - ./config/ue_premium.yaml:/etc/ueransim/ue.yaml
+      - ./scripts:/scripts:ro
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun
+    networks:
+      - open5gs
+
+  ue_background:
+    image: free5gc/ueransim:latest
+    platform: linux/amd64
+    hostname: ue-background
+    restart: unless-stopped
+    entrypoint: ["/bin/bash", "/scripts/entrypoint-ue.sh"]
+    depends_on:
+      gnb:
+        condition: service_healthy
+    volumes:
+      - ./config/ue_background.yaml:/etc/ueransim/ue.yaml
+      - ./scripts:/scripts:ro
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun
+    networks:
+      - open5gs
+
+  ue_control:
+    image: free5gc/ueransim:latest
+    platform: linux/amd64
+    hostname: ue-control
+    restart: unless-stopped
+    entrypoint: ["/bin/bash", "/scripts/entrypoint-ue.sh"]
+    depends_on:
+      gnb:
+        condition: service_healthy
+    volumes:
+      - ./config/ue_control.yaml:/etc/ueransim/ue.yaml
+      - ./scripts:/scripts:ro
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun
+    networks:
+      - open5gs
+
+  # ============ Observability Stack (Optional Profile) ============
+
+  prometheus:
+    image: prom/prometheus:v2.45.0
+    hostname: prometheus
+    profiles: ["observability", "full"]
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9092}:9090"
+    networks:
+      - open5gs
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9090/-/healthy || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+networks:
+  open5gs:
+    driver: bridge
+
+volumes:
+  mongo_data:
+  prometheus_data:

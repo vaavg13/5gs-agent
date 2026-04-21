@@ -1,0 +1,54 @@
+logger:
+  level: info
+  file: /opt/open5gs/var/log/open5gs/smf.log
+
+sbi:
+  server:
+    no_tls: true
+  client:
+    no_tls: true
+
+nrf:
+  sbi:
+    - addr: nrf
+      port: 7777
+
+upf:
+  pfcp:
+    - addr: upf
+
+smf:
+  sbi:
+    - addr: smf
+      port: 7777
+
+  info:
+    - s_nssai:
+        - sst: 1
+          sd: 000001
+          dnn:
+            - internet
+
+  pfcp:
+    - addr: 0.0.0.0
+      port: 8805
+
+  gtpc:
+    - addr: 0.0.0.0
+
+  gtpu:
+    - addr: 0.0.0.0
+
+  metrics:
+    - addr: 0.0.0.0
+      port: 9091
+
+  subnet:
+    - addr: 10.46.0.1/16
+      dnn: internet
+
+  dns:
+    - 8.8.8.8
+    - 8.8.4.4
+
+  mtu: 1400

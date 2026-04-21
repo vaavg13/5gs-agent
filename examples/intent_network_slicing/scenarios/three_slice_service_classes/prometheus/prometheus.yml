@@ -1,0 +1,36 @@
+# Prometheus configuration for Open5GS metrics collection
+# Scrapes AMF and SMF metrics endpoints via Docker internal network
+
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+  # External labels identify which stack metrics come from (for multi-instance scenarios)
+  external_labels:
+    stack: 'open5gs_sa'
+
+scrape_configs:
+  # Open5GS AMF metrics
+  - job_name: 'open5gs-amf'
+    static_configs:
+      - targets: ['amf:9090']
+    metrics_path: /metrics
+    scrape_interval: 5s
+
+  # Open5GS SMF metrics
+  - job_name: 'open5gs-smf'
+    static_configs:
+      - targets: ['smf:9091']
+    metrics_path: /metrics
+    scrape_interval: 5s
+
+  # Open5GS UPF metrics (user plane - packet counts, volumes, sessions)
+  - job_name: 'open5gs-upf'
+    static_configs:
+      - targets: ['upf:9092']
+    metrics_path: /metrics
+    scrape_interval: 5s
+
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']

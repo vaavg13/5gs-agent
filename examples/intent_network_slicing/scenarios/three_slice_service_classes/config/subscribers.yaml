@@ -1,0 +1,31 @@
+subscribers:
+- imsi: '999700000000001'
+  status: active
+  k: 465B5CE8B199B49FAA5F0A2EE238A6BC
+  opc: E8ED289DEBA952E4283B54E88E6183CA
+  amf: '8000'
+  sqn: '000000000000'
+  apn: premium
+  sst: 1
+  sd: '000002'
+  description: Premium VR subscriber
+- imsi: '999700000000002'
+  status: active
+  k: 465B5CE8B199B49FAA5F0A2EE238A6BD
+  opc: E8ED289DEBA952E4283B54E88E6183CB
+  amf: '8000'
+  sqn: '000000000000'
+  apn: background
+  sst: 1
+  sd: '000001'
+  description: Background best-effort subscriber
+- imsi: '999700000000003'
+  status: active
+  k: 465B5CE8B199B49FAA5F0A2EE238A6BE
+  opc: E8ED289DEBA952E4283B54E88E6183CC
+  amf: '8000'
+  sqn: '000000000000'
+  apn: control
+  sst: 1
+  sd: '000003'
+  description: Protected control subscriber
