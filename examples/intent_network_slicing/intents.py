@@ -284,16 +284,14 @@ def target_ue_service(intent: dict[str, Any] | None) -> str:
 
 
 def format_intent_summary(intent: dict[str, Any]) -> str:
-    """Render a compact intent summary for the agent prompt."""
+    """Render a compact intent summary for the agent prompt.
+
+    Deliberately omits slice identifiers (SST/SD) — the agent must
+    discover slice assignments by querying the network.
+    """
     normalized = validate_intent(intent)
 
     lines = [f"Service intent: {normalized['service']}"]
-
-    if "slice" in normalized:
-        lines.append(
-            "Target slice: "
-            f"SST={normalized['slice']['sst']} SD={normalized['slice']['sd']}"
-        )
 
     if normalized.get("ues"):
         lines.append("UE roles:")
@@ -301,10 +299,6 @@ def format_intent_summary(intent: dict[str, Any]) -> str:
             line = f"- {ue['ue_id']} ({ue['role']})"
             if ue.get("service"):
                 line += f" service={ue['service']}"
-            if "slice" in ue:
-                line += (
-                    f": SST={ue['slice']['sst']} SD={ue['slice']['sd']}"
-                )
             lines.append(line)
 
     lines.append("Hard objectives:")

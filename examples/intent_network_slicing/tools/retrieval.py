@@ -12,11 +12,7 @@ from inspect_ai.tool import ToolError, tool
 from inspect_ai.util import store_as, sandbox
 
 from action_journal import ActionJournal
-from diagnosis import (
-    collect_diagnostic_snapshot,
-    format_diagnosis_report,
-    infer_root_causes,
-)
+from diagnosis import collect_diagnostic_snapshot
 from ._validation import VALID_SERVICES
 from ._ue_path import prepare_tunnel_path
 
@@ -64,55 +60,70 @@ def _log_path_for_service(service: str) -> str | None:
 
 @tool
 def diagnose_network_issue():
-    """Produce a structured diagnosis before remediation.
+    """Collect a diagnostic snapshot of the network state.
 
-    This tool correlates UE, subscriber, AMF, NRF, and UPF state to produce
-    explicit root-cause hypotheses for the agent to evaluate.
+    Gathers raw data from UE, UPF, AMF, NRF, and subscriber database.
+    Returns the unprocessed output for the agent to analyze.
     """
 
     async def execute(
         ue_service: str = "ue_premium",
-        expected_sst: int | None = None,
-        expected_sd: str | None = None,
         imsi: str | None = None,
-        include_snapshot: bool = False,
     ) -> str:
-        """Diagnose the current fault state.
+        """Collect diagnostic data from network components.
 
         Args:
             ue_service: UE container to inspect (for example `ue_premium`)
-            expected_sst: Optional expected slice SST from the intent
-            expected_sd: Optional expected slice SD from the intent
-            imsi: Optional IMSI to focus subscriber checks
-            include_snapshot: Include raw structured snapshot as JSON
+            imsi: Optional IMSI to focus subscriber query on a single record
 
         Returns:
-            Diagnosis report with ranked hypotheses.
+            Raw diagnostic data from network components.
         """
-        expected_slice = None
-        if expected_sst is not None or expected_sd is not None:
-            if expected_sst is None or expected_sd is None:
-                return "Both expected_sst and expected_sd are required when specifying an expected slice"
-            try:
-                expected_slice = {
-                    "sst": int(expected_sst),
-                    "sd": str(expected_sd),
-                }
-            except (TypeError, ValueError):
-                return "Invalid expected slice values"
-
         snapshot = await collect_diagnostic_snapshot(
             ue_service=ue_service,
             imsi=imsi,
-            expected_slice=expected_slice,
+            expected_slice=None,
         )
-        hypotheses = infer_root_causes(snapshot)
-        report = format_diagnosis_report(snapshot, hypotheses)
 
-        if include_snapshot:
-            report += "\n\nSnapshot:\n" + json.dumps(snapshot, indent=2, sort_keys=True)
+        lines = ["=== Network Diagnostic Snapshot ==="]
 
-        return report
+        ue_info = snapshot.get("ue", {})
+        lines.append(f"\n--- UE ({ue_info.get('service', ue_service)}) ---")
+        lines.append(f"PDU session active: {ue_info.get('pdu_session_active')}")
+        if ue_info.get("interface_output"):
+            lines.append(f"Interface:\n{ue_info['interface_output']}")
+        if ue_info.get("routes"):
+            lines.append(f"Routes:\n{ue_info['routes']}")
+
+        upf_info = snapshot.get("upf", {})
+        lines.append("\n--- UPF (ogstun) ---")
+        qdisc = upf_info.get("qdisc_output", "")
+        lines.append(f"tc qdisc output:\n{qdisc}" if qdisc else "tc qdisc output: (empty)")
+
+        amf_info = snapshot.get("amf", {})
+        lines.append("\n--- AMF ---")
+        slices = amf_info.get("configured_slices", [])
+        if slices:
+            for s in slices:
+                lines.append(f"  Configured slice: SST={s.get('sst')} SD={s.get('sd')}")
+        elif amf_info.get("error"):
+            lines.append(f"  Error: {amf_info['error']}")
+
+        nrf_info = snapshot.get("nrf", {})
+        lines.append("\n--- NRF ---")
+        lines.append(f"Query success: {nrf_info.get('query_success')}")
+
+        sub_info = snapshot.get("subscriber", {})
+        lines.append("\n--- Subscriber Database ---")
+        records = sub_info.get("records")
+        if records:
+            lines.append(json.dumps(records, indent=2, default=str))
+        elif sub_info.get("error"):
+            lines.append(f"  Error: {sub_info['error']}")
+        else:
+            lines.append("  No records found")
+
+        return "\n".join(lines)
 
     return execute
 

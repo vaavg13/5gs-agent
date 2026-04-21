@@ -21,11 +21,9 @@ from ._validation import VALID_SERVICES
 AMF_CONFIG_PATH = "/opt/open5gs/etc/open5gs/amf.yaml"
 SMF_CONFIG_PATH = "/opt/open5gs/etc/open5gs/smf.yaml"
 NSSF_CONFIG_PATH = "/opt/open5gs/etc/open5gs/nssf.yaml"
-UPF_SERVICE_CLASS_CONFIGS = {
-    "healthy": "/etc/open5gs/service-classes.yaml",
-    "demoted": "/etc/open5gs/service-classes-demoted.yaml",
-    "lossy_premium": "/etc/open5gs/service-classes-lossy-premium.yaml",
-}
+UPF_QOS_CONFIG_PATH = "/etc/open5gs/service-classes.yaml"
+UPF_QOS_OVERRIDE_PATH = "/tmp/service-classes-override.yaml"
+UPF_QOS_APPLY_SCRIPT = "/scripts/apply-service-class-qos.sh"
 
 # 3GPP validation rules
 VALIDATION_RULES = {
@@ -514,54 +512,105 @@ def restart_service():
 
 
 @tool
-def apply_service_class_profile():
-    """Apply a named UPF traffic-class profile.
+def get_upf_qos_config():
+    """Read the UPF traffic-shaping state.
 
-    This is a structured alternative to raw shell commands for scenarios that
-    differentiate premium, protected, and background service classes on the UPF.
+    Returns the active tc rules on the data-plane interface along with the
+    default service-class configuration file for reference.
     """
 
-    async def execute(profile: str = "healthy") -> str:
-        """Apply one of the mounted service-class profiles on the UPF.
-
-        Args:
-            profile: Named profile to apply ("healthy" or "demoted")
+    async def execute() -> str:
+        """Read the active UPF QoS state and configuration.
 
         Returns:
-            Summary of the applied profile.
+            Active tc rules and configuration file content.
         """
-        clean_profile = str(profile).strip().lower()
-        if clean_profile not in UPF_SERVICE_CLASS_CONFIGS:
-            valid = ", ".join(sorted(UPF_SERVICE_CLASS_CONFIGS))
-            raise ToolError(f"Unknown profile '{profile}'. Valid profiles: {valid}")
-
-        config_path = UPF_SERVICE_CLASS_CONFIGS[clean_profile]
         upf = sandbox("upf")
-        result = await upf.exec(
-            ["/scripts/apply-service-class-qos.sh", config_path],
+
+        tc_result = await upf.exec(
+            ["sh", "-c", "echo '--- tc qdisc ---' && tc qdisc show dev ogstun 2>&1 && echo '--- tc class ---' && tc class show dev ogstun 2>&1 && echo '--- tc filter ---' && tc filter show dev ogstun 2>&1"],
+            timeout=10,
+        )
+        tc_output = tc_result.stdout.strip() if tc_result.success else f"(error: {tc_result.stderr})"
+
+        config_result = await upf.exec(["cat", UPF_QOS_CONFIG_PATH], timeout=5)
+        config_output = config_result.stdout.strip() if config_result.success else "(not readable)"
+
+        return (
+            f"=== Active tc rules on ogstun ===\n{tc_output}\n\n"
+            f"=== Config file ({UPF_QOS_CONFIG_PATH}) ===\n{config_output}"
+        )
+
+    return execute
+
+
+@tool
+def apply_upf_qos_config():
+    """Write and apply UPF traffic-shaping configuration.
+
+    Writes a service-class YAML and re-applies traffic control rules on
+    the UPF data-plane interface. The agent must provide the complete
+    YAML content with the desired parameters.
+
+    Changes take effect immediately — no service restart is needed.
+    """
+
+    async def execute(config_yaml: str) -> str:
+        """Write a new QoS configuration and apply it on the UPF.
+
+        Args:
+            config_yaml: Complete service-class YAML content to write
+
+        Returns:
+            Result of applying the new configuration.
+        """
+        if not config_yaml or not config_yaml.strip():
+            raise ToolError("config_yaml must be non-empty YAML content")
+
+        try:
+            parsed = yaml.safe_load(config_yaml)
+        except Exception as exc:
+            raise ToolError(f"Invalid YAML: {exc}") from exc
+
+        if not isinstance(parsed, dict):
+            raise ToolError("config_yaml must be a YAML mapping")
+
+        upf = sandbox("upf")
+
+        tc_before = await upf.exec(["sh", "-c", "tc qdisc show dev ogstun 2>&1"], timeout=5)
+        old_state = tc_before.stdout.strip() if tc_before.success else "(unreadable)"
+
+        write_result = await upf.exec(
+            ["sh", "-c", f"cat > {UPF_QOS_OVERRIDE_PATH} << 'QOSEOF'\n{config_yaml}\nQOSEOF"],
+            timeout=5,
+        )
+        if not write_result.success:
+            raise ToolError(f"Failed to write QoS config: {write_result.stderr}")
+
+        apply_result = await upf.exec(
+            [UPF_QOS_APPLY_SCRIPT, UPF_QOS_OVERRIDE_PATH],
             timeout=20,
         )
 
-        success = result.success
+        success = apply_result.success
         record_action(
-            tool_name="apply_service_class_profile",
+            tool_name="apply_upf_qos_config",
             target="upf:ogstun",
-            parameters={"profile": clean_profile, "config_path": config_path},
-            new_value={"profile": clean_profile},
+            parameters={"config_path": UPF_QOS_OVERRIDE_PATH},
+            old_value=old_state,
+            new_value=config_yaml.strip(),
             success=success,
             restart_required=False,
             risk_class="medium",
-            details="Applied named UPF service-class profile",
+            details="Wrote and applied UPF QoS configuration",
         )
 
         if not success:
-            raise ToolError(result.stderr or result.stdout or "Failed to apply service-class profile")
+            raise ToolError(
+                f"Config written but apply failed:\n{apply_result.stderr or apply_result.stdout}"
+            )
 
-        return (
-            f"Applied UPF service-class profile '{clean_profile}'.\n"
-            f"Config: {config_path}\n\n"
-            f"{result.stdout}"
-        )
+        return f"QoS configuration applied successfully.\n\n{apply_result.stdout}"
 
     return execute
 

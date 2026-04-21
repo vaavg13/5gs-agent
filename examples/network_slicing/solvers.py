@@ -5,12 +5,15 @@ Provides impairment injection similar to Kathara's inject_faults() pattern.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from inspect_ai.solver import Generate, Solver, TaskState, solver
 from inspect_ai.util import sandbox
 
 logger = logging.getLogger(__name__)
+
+METRICS_CSV_PATH = "/tmp/metrics.csv"
 
 
 @solver
@@ -41,7 +44,7 @@ def inject_impairments() -> Solver:
             if not script or not script.strip():
                 continue
 
-            logger.info(f"Injecting impairment on {service}: {script[:50]}...")
+            logger.debug(f"Injecting impairment on {service}")
 
             try:
                 service_sandbox = sandbox(name=service)
@@ -57,6 +60,42 @@ def inject_impairments() -> Solver:
             except Exception as e:
                 logger.error(f"Failed to inject impairment on {service}: {e}")
 
+        return state
+
+    return solve
+
+
+@solver
+def start_metrics_collector() -> Solver:
+    """Start background iperf3 + ping collector in the UE container.
+
+    Launches a continuous measurement stream that writes per-second CSV rows.
+    Must run after inject_impairments so the collector captures the degraded state.
+    """
+
+    async def solve(state: TaskState, generate: Generate) -> TaskState:
+        ue = sandbox("ue")
+        await ue.exec(
+            [
+                "sh",
+                "-c",
+                "bash /scripts/metrics-collector.sh iperf3-server "
+                f"{METRICS_CSV_PATH} uesimtun0 "
+                "> /tmp/metrics-collector.log 2>&1 &",
+            ],
+            timeout=10,
+        )
+        for _ in range(15):
+            await asyncio.sleep(2)
+            check = await ue.exec(["wc", "-l", METRICS_CSV_PATH], timeout=5)
+            if check.success:
+                lines = int(check.stdout.strip().split()[0])
+                if lines > 1:
+                    logger.info(
+                        f"Metrics collector running ({lines - 1} data rows)"
+                    )
+                    return state
+        logger.warning("Metrics collector: no data rows after 30s")
         return state
 
     return solve

@@ -71,9 +71,9 @@ samples:
 
   - id: three_slice_premium_service_demoted
     input: |
-      The premium UE is attached, but it is no longer receiving premium treatment.
-      Use diagnosis to confirm the premium service class has been demoted at the UPF and restore the intended premium behavior without breaking the control or background UEs.
-    target: "Restore premium slice-class performance"
+      The premium UE's network performance has degraded significantly.
+      Diagnose the root cause and restore the intended service level without disrupting other UEs.
+    target: "Premium UE meets all SLA objectives"
     sandbox: [open5gs, "three_slice_service_classes/compose.yaml"]
     intent:
       service: three_slice_service_classes
@@ -135,9 +135,9 @@ samples:
 
   - id: three_slice_premium_lossy
     input: |
-      The premium UE remains attached, but users report unstable premium traffic with packet loss.
-      Diagnose whether the premium service class is impaired on the UPF and restore healthy premium behavior without harming the control UE.
-    target: "Restore premium slice reliability"
+      Users on the premium UE report intermittent connectivity issues and degraded quality.
+      Investigate the cause and restore stable, high-quality service without disrupting other UEs.
+    target: "Premium UE meets all SLA objectives with stable connectivity"
     sandbox: [open5gs, "three_slice_service_classes/compose.yaml"]
     intent:
       service: three_slice_service_classes
@@ -199,9 +199,9 @@ samples:
 
   - id: three_slice_premium_subscriber_misrouted
     input: |
-      The premium subscriber profile has been changed and the premium UE no longer receives its intended service.
-      Diagnose the subscriber mismatch, restore the premium subscriber profile, and verify that the protected control UE remains healthy.
-    target: "Restore premium subscriber-to-slice mapping"
+      The premium UE is no longer receiving its expected service level despite being connected.
+      Diagnose the issue across all relevant subsystems and restore proper service without disrupting other UEs.
+    target: "Premium UE receives intended service level and all SLA objectives are met"
     sandbox: [open5gs, "three_slice_service_classes/compose.yaml"]
     intent:
       service: three_slice_service_classes

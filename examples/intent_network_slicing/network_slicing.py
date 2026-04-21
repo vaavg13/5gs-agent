@@ -26,10 +26,11 @@ from intents import (
     validate_intent,
 )
 from scorer import sla_compliance_scorer
-from solvers import inject_impairments
+from solvers import collect_post_agent_metrics, inject_impairments, start_metrics_collector
 from tools.action import (
-    apply_service_class_profile,
+    apply_upf_qos_config,
     exec_shell,
+    get_upf_qos_config,
     modify_amf_config,
     restart_service,
     trigger_ue_registration,
@@ -64,10 +65,11 @@ Satisfy the formal service intent while minimizing unnecessary changes.
 ## Available Tools
 
 ### Diagnostics (Read-Only)
-- diagnose_network_issue: Produce structured hypotheses before taking action
+- diagnose_network_issue: Collect raw diagnostic data from network components
 - get_action_journal: Inspect the action history recorded by state-changing tools
 - get_amf_config: Read AMF configuration (GUAMI, TAI, slices)
 - get_network_config: Read SMF/UPF/gNB configuration
+- get_upf_qos_config: Read current UPF traffic-shaping parameters
 - get_subscriber_info: Query subscriber database by IMSI or UE service
 - get_nf_status: Check NF registration with NRF
 - get_ue_status: Check UE registration and PDU session
@@ -76,7 +78,7 @@ Satisfy the formal service intent while minimizing unnecessary changes.
 
 ### Configuration (State-Changing)
 - modify_amf_config: Update AMF YAML configuration
-- apply_service_class_profile: Apply the healthy or demoted UPF service-class profile
+- apply_upf_qos_config: Write and apply UPF traffic-shaping configuration
 - upsert_smf_slice: Create or update an SMF slice to DNN mapping
 - upsert_nssf_slice: Create or update an NSSF slice selection entry
 - update_subscriber_slice: Update subscriber slice and DNN in MongoDB
@@ -84,9 +86,9 @@ Satisfy the formal service intent while minimizing unnecessary changes.
 - trigger_ue_registration: Re-register UE after changes
 - exec_shell: Execute shell commands for advanced operations
 
-### Measurement
-- measure_ue_throughput: Run iperf3 tests
-- measure_ue_latency: Run ping tests for latency/jitter
+### Measurement (from continuous monitoring stream)
+- measure_ue_throughput: Read throughput from the live iperf3 monitoring stream
+- measure_ue_latency: Read latency/jitter/loss from the live ping monitoring stream
 - query_prometheus: Query 5G metrics
 
 ## Network Architecture
@@ -226,6 +228,7 @@ def _intent_network_task() -> Task:
         dataset=load_dataset(),
         solver=[
             inject_impairments(),  # Inject faults before agent runs
+            start_metrics_collector(),  # Start continuous monitoring
             system_message(SYSTEM_PROMPT),
             react(
                 tools=[
@@ -234,6 +237,7 @@ def _intent_network_task() -> Task:
                     get_action_journal(),
                     get_amf_config(),
                     get_network_config(),
+                    get_upf_qos_config(),
                     get_subscriber_info(),
                     get_nf_status(),
                     get_ue_status(),
@@ -241,7 +245,7 @@ def _intent_network_task() -> Task:
                     check_connectivity(),
                     # Configuration
                     modify_amf_config(),
-                    apply_service_class_profile(),
+                    apply_upf_qos_config(),
                     upsert_smf_slice(),
                     upsert_nssf_slice(),
                     update_subscriber_slice(),
@@ -254,6 +258,7 @@ def _intent_network_task() -> Task:
                     query_prometheus(),
                 ],
             ),
+            collect_post_agent_metrics(),  # 30s of clean post-fix data
         ],
         scorer=sla_compliance_scorer(),
         message_limit=30,

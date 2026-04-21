@@ -65,13 +65,7 @@ async def collect_diagnostic_snapshot(
     snapshot["ue"]["routes"] = route_result.stdout.strip() if route_result.success else ""
 
     tc_result = await upf.exec(["sh", "-c", "tc qdisc show dev ogstun"], timeout=5)
-    qdisc_output = tc_result.stdout.strip() if tc_result.success else ""
-    snapshot["upf"]["qdisc_output"] = qdisc_output
-    # Healthy service-class shaping uses HTB plus per-class delay. Reserve the
-    # "impairment" signal for packet loss or more disruptive netem behaviors.
-    snapshot["upf"]["transport_impairment_detected"] = any(
-        token in qdisc_output for token in (" loss ", "corrupt", "reorder", "duplicate")
-    )
+    snapshot["upf"]["qdisc_output"] = tc_result.stdout.strip() if tc_result.success else ""
 
     amf_result = await amf.exec(["cat", "/opt/open5gs/etc/open5gs/amf.yaml"], timeout=5)
     if amf_result.success:

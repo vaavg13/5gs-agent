@@ -1,13 +1,11 @@
-"""SLA compliance scorer for network slicing tasks.
+"""SLA compliance scorer for intent-driven network slicing tasks.
 
-Runs iperf3/ping measurements and evaluates against SLA thresholds
-defined in sample metadata or derived from a formal intent.
+Reads measurements from the background metrics collector CSV and
+evaluates against SLA thresholds defined in sample metadata or formal intent.
+Exports the full time-series in the Score metadata for post-experiment analysis.
 """
 
 from __future__ import annotations
-
-import json
-import re
 
 from inspect_ai.scorer import Score, Target, mean, scorer, stderr
 from inspect_ai.solver import TaskState
@@ -16,9 +14,9 @@ from inspect_ai.util import sandbox, store_as
 from action_journal import ActionJournal
 from intents import build_expected_metrics_from_intent
 from intents import resolve_ue_service, target_ue_service
-from tools._ue_path import prepare_tunnel_path
 
-# Metric definitions: (measurement_key, operator, failure_default)
+METRICS_CSV_PATH = "/tmp/metrics.csv"
+
 METRIC_DEFINITIONS = {
     "uplink_throughput_mbps": ("uplink_mbps", ">=", 0.0),
     "downlink_throughput_mbps": ("downlink_mbps", ">=", 0.0),
@@ -29,105 +27,51 @@ METRIC_DEFINITIONS = {
 
 
 def _parse_metric_target(metric_key: str, intent: dict | None) -> tuple[str, str]:
-    """Split a metric key into UE service and normalized metric name."""
     if "." in metric_key:
         ue_id, metric_name = metric_key.split(".", 1)
         return resolve_ue_service(intent, ue_id), metric_name
     return target_ue_service(intent), metric_key
 
 
-async def _check_connectivity(ue_service: str) -> tuple[bool, str]:
-    """Check if UE can reach iperf3 server."""
+async def _read_all_metrics(ue_service: str) -> tuple[list[dict], str]:
     ue = sandbox(ue_service)
-    try:
-        target_ip, tunnel_ip = await prepare_tunnel_path(ue, "iperf3-server")
-    except Exception as exc:
-        return False, str(exc)
-    result = await ue.exec(["ping", "-c", "3", "-I", tunnel_ip, target_ip], timeout=15)
+    result = await ue.exec(["cat", METRICS_CSV_PATH], timeout=10)
+    if not result.success:
+        return [], ""
+
+    raw_csv = result.stdout
+    rows = []
+    for line in raw_csv.strip().split("\n"):
+        parts = line.split(",")
+        if len(parts) != 5 or parts[0] == "timestamp":
+            continue
+        try:
+            rows.append(
+                {
+                    "timestamp": parts[0],
+                    "throughput_mbps": float(parts[1]),
+                    "latency_ms": float(parts[2]),
+                    "jitter_ms": float(parts[3]),
+                    "packet_loss_pct": float(parts[4]),
+                }
+            )
+        except ValueError:
+            continue
+    return rows, raw_csv
+
+
+async def _check_connectivity(ue_service: str) -> tuple[bool, str]:
+    ue = sandbox(ue_service)
+    result = await ue.exec(
+        ["ping", "-c", "3", "-I", "uesimtun0", "iperf3-server"],
+        timeout=15,
+    )
     if result.success:
         return True, "Connectivity OK"
     return False, result.stderr or "Ping failed"
 
 
-async def _measure_throughput(
-    ue_service: str,
-    direction: str,
-    duration: int = 10,
-) -> tuple[bool, float]:
-    """Run iperf3 throughput test."""
-    ue = sandbox(ue_service)
-    try:
-        target_ip, tunnel_ip = await prepare_tunnel_path(ue, "iperf3-server")
-    except Exception:
-        return False, 0.0
-
-    cmd = [
-        "iperf3",
-        "-c",
-        target_ip,
-        "-t",
-        str(duration),
-        "-J",
-        "-B",
-        tunnel_ip,
-    ]
-    if direction == "downlink":
-        cmd.append("-R")
-
-    result = await ue.exec(cmd, timeout=duration + 30)
-
-    if not result.success:
-        return False, 0.0
-
-    try:
-        data = json.loads(result.stdout)
-        end = data.get("end", {})
-        sum_key = "sum_received" if direction == "downlink" else "sum_sent"
-        bits_per_second = end.get(sum_key, {}).get("bits_per_second", 0)
-        return True, bits_per_second / 1_000_000
-    except (json.JSONDecodeError, KeyError):
-        return False, 0.0
-
-
-async def _measure_latency(
-    ue_service: str,
-    count: int = 30,
-) -> tuple[bool, float, float, float]:
-    """Run ping latency test. Returns (success, avg_latency, jitter, loss_pct)."""
-    ue = sandbox(ue_service)
-    try:
-        target_ip, tunnel_ip = await prepare_tunnel_path(ue, "iperf3-server")
-    except Exception:
-        return False, 999.0, 999.0, 100.0
-
-    result = await ue.exec(
-        ["ping", "-c", str(count), "-I", tunnel_ip, target_ip],
-        timeout=count + 30,
-    )
-
-    if not result.success:
-        return False, 999.0, 999.0, 100.0
-
-    output = result.stdout
-
-    # Extract packet loss
-    loss_match = re.search(r"(\d+)% packet loss", output)
-    loss_pct = float(loss_match.group(1)) if loss_match else 100.0
-
-    # Extract RTT stats
-    rtt_match = re.search(
-        r"rtt min/avg/max/mdev = ([\d.]+)/([\d.]+)/([\d.]+)/([\d.]+)",
-        output,
-    )
-    if rtt_match:
-        _, avg_rtt, _, mdev = rtt_match.groups()
-        return True, float(avg_rtt), float(mdev), loss_pct
-
-    return False, 999.0, 999.0, loss_pct
-
-
 def _check_threshold(measured: float, operator: str, threshold: float) -> bool:
-    """Check if measured value meets threshold."""
     if operator == ">=":
         return measured >= threshold
     return measured <= threshold
@@ -135,10 +79,9 @@ def _check_threshold(measured: float, operator: str, threshold: float) -> bool:
 
 @scorer(metrics=[mean(), stderr()])
 def sla_compliance_scorer():
-    """Score based on iperf3/ping measurements against SLA from metadata."""
+    """Score based on continuous monitoring CSV against SLA from metadata."""
 
     async def score(state: TaskState, target: Target) -> Score:
-        # Get thresholds from metadata or derive them from formal intent
         expected = state.metadata.get("expected_metrics", {})
         intent = state.metadata.get("intent")
         if not expected and intent:
@@ -168,22 +111,37 @@ def sla_compliance_scorer():
                 explanation="; ".join(connectivity_failures),
             )
 
+        csv_by_service: dict[str, str] = {}
         measurements_by_service: dict[str, dict[str, float]] = {}
         for ue_service in sorted(required_services):
-            measurements = {}
-            ul_ok, ul_mbps = await _measure_throughput(ue_service, "uplink")
-            measurements["uplink_mbps"] = ul_mbps if ul_ok else 0.0
+            all_rows, raw_csv = await _read_all_metrics(ue_service)
+            csv_by_service[ue_service] = raw_csv
 
-            dl_ok, dl_mbps = await _measure_throughput(ue_service, "downlink")
-            measurements["downlink_mbps"] = dl_mbps if dl_ok else 0.0
+            window = all_rows[-15:] if len(all_rows) >= 15 else all_rows
+            if not window:
+                measurements_by_service[ue_service] = {
+                    "uplink_mbps": 0.0,
+                    "downlink_mbps": 0.0,
+                    "latency_ms": 999.0,
+                    "jitter_ms": 999.0,
+                    "packet_loss_pct": 100.0,
+                }
+                continue
 
-            lat_ok, latency, jitter, loss = await _measure_latency(ue_service)
-            measurements["latency_ms"] = latency
-            measurements["jitter_ms"] = jitter
-            measurements["packet_loss_pct"] = loss
-            measurements_by_service[ue_service] = measurements
+            throughputs = [r["throughput_mbps"] for r in window]
+            latencies = [r["latency_ms"] for r in window]
+            jitters = [r["jitter_ms"] for r in window]
+            losses = [r["packet_loss_pct"] for r in window]
 
-        # Evaluate against thresholds
+            avg_tp = sum(throughputs) / len(throughputs)
+            measurements_by_service[ue_service] = {
+                "uplink_mbps": avg_tp,
+                "downlink_mbps": avg_tp,
+                "latency_ms": sum(latencies) / len(latencies),
+                "jitter_ms": sum(jitters) / len(jitters),
+                "packet_loss_pct": sum(losses) / len(losses),
+            }
+
         compliance = {}
         for expected_key, threshold in expected.items():
             ue_service, normalized_metric = _parse_metric_target(expected_key, intent)
@@ -191,12 +149,10 @@ def sla_compliance_scorer():
             measured = measurements_by_service.get(ue_service, {}).get(measurement_key, default)
             compliance[expected_key] = _check_threshold(measured, operator, threshold)
 
-        # Calculate score
         num_passing = sum(compliance.values())
         total = len(compliance)
         overall_score = num_passing / total if total > 0 else 0.0
 
-        # Build explanation
         lines = []
         for expected_key, threshold in expected.items():
             ue_service, normalized_metric = _parse_metric_target(expected_key, intent)
@@ -229,6 +185,10 @@ def sla_compliance_scorer():
                 "intent": intent,
                 "action_count": len(journal.actions),
                 "restart_count": restart_count,
+                "metrics_csv": csv_by_service,
+                "action_journal": [
+                    a.model_dump(mode="json") for a in journal.actions
+                ],
             },
         )
 

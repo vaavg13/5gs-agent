@@ -39,7 +39,7 @@ samples:
 
   - id: vr_gaming_latency_impaired
     input: |
-      The VR gaming slice is experiencing high latency. Diagnose and fix the issue.
+      The VR gaming slice is experiencing degraded performance. Users report sluggish responsiveness.
 
       Target SLA:
       - Uplink throughput: ≥50 Mbps
@@ -48,8 +48,8 @@ samples:
       - Jitter: ≤5ms
       - Packet loss: ≤0.1%
 
-      Network impairment has been injected. Find and resolve it.
-    target: "Remove tc netem delay from UPF"
+      Diagnose the issue and restore SLA compliance.
+    target: "All SLA metrics within target thresholds"
     sandbox: [open5gs, "vr_gaming/compose.yaml"]
     metadata:
       difficulty: medium
@@ -64,7 +64,7 @@ samples:
 
   - id: vr_gaming_packet_loss
     input: |
-      The VR gaming slice is experiencing packet loss. Diagnose and fix the issue.
+      The VR gaming slice is experiencing degraded quality. Users report stuttering and dropped frames.
 
       Target SLA:
       - Uplink throughput: ≥50 Mbps
@@ -73,8 +73,8 @@ samples:
       - Jitter: ≤5ms
       - Packet loss: ≤0.1%
 
-      Network impairment has been injected. Find and resolve it.
-    target: "Remove tc netem loss from UPF"
+      Diagnose the issue and restore SLA compliance.
+    target: "All SLA metrics within target thresholds"
     sandbox: [open5gs, "vr_gaming/compose.yaml"]
     metadata:
       difficulty: medium
