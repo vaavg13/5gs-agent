@@ -24,6 +24,14 @@ dependencies = [
     "inspect-ai>=0.3.0",
     "aiohttp>=3.9.0",
     "pyyaml>=6.0",
+    "openai>=2.32.0",
+    "matplotlib>=3.10.8",
+    "seaborn>=0.13.2",
+    "pandas>=2.3.3",
+    "jupyter>=1.1.1",
+    "nbconvert>=7.17.1",
+    "ipykernel>=7.2.0",
+    "nbformat>=5.10.4",
 ]
 
 [project.optional-dependencies]

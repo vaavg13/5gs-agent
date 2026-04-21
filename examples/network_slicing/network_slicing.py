@@ -21,7 +21,7 @@ from inspect_ai.dataset import MemoryDataset, Sample
 from inspect_ai.solver import system_message
 
 from scorer import sla_compliance_scorer
-from solvers import inject_impairments
+from solvers import inject_impairments, start_metrics_collector
 from tools.action import (
     exec_shell,
     modify_amf_config,
@@ -67,9 +67,9 @@ Configure a network slice to meet the specified SLA requirements.
 - trigger_ue_registration: Re-register UE after changes
 - exec_shell: Execute shell commands for advanced operations
 
-### Measurement
-- measure_ue_throughput: Run iperf3 tests
-- measure_ue_latency: Run ping tests for latency/jitter
+### Measurement (from continuous monitoring stream)
+- measure_ue_throughput: Read throughput from the live iperf3 monitoring stream
+- measure_ue_latency: Read latency/jitter/loss from the live ping monitoring stream
 - query_prometheus: Query 5G metrics
 
 ## Network Architecture
@@ -177,6 +177,7 @@ def vr_gaming_slice() -> Task:
         dataset=load_dataset(),
         solver=[
             inject_impairments(),  # Inject faults before agent runs
+            start_metrics_collector(),  # Start continuous monitoring
             system_message(SYSTEM_PROMPT),
             react(
                 tools=[

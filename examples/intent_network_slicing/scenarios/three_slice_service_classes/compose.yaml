@@ -244,7 +244,6 @@ services:
 
   gnb:
     image: free5gc/ueransim:latest
-    platform: linux/amd64
     hostname: gnb
     restart: unless-stopped
     entrypoint: ["/bin/bash", "/scripts/entrypoint-gnb.sh"]
@@ -273,7 +272,6 @@ services:
 
   ue_premium:
     image: free5gc/ueransim:latest
-    platform: linux/amd64
     hostname: ue-premium
     restart: unless-stopped
     entrypoint: ["/bin/bash", "/scripts/entrypoint-ue.sh"]
@@ -292,7 +290,6 @@ services:
 
   ue_background:
     image: free5gc/ueransim:latest
-    platform: linux/amd64
     hostname: ue-background
     restart: unless-stopped
     entrypoint: ["/bin/bash", "/scripts/entrypoint-ue.sh"]
@@ -311,7 +308,6 @@ services:
 
   ue_control:
     image: free5gc/ueransim:latest
-    platform: linux/amd64
     hostname: ue-control
     restart: unless-stopped
     entrypoint: ["/bin/bash", "/scripts/entrypoint-ue.sh"]

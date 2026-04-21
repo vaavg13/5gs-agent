@@ -1,19 +1,20 @@
 """SLA compliance scorer for network slicing tasks.
 
-Runs iperf3/ping measurements and evaluates against SLA thresholds
-defined in sample metadata.
+Reads measurements from the background metrics collector CSV and
+evaluates against SLA thresholds defined in sample metadata.
+Exports the full time-series in the Score metadata for post-experiment analysis.
 """
 
 from __future__ import annotations
 
-import json
 import re
 
 from inspect_ai.scorer import Score, Target, mean, scorer, stderr
 from inspect_ai.solver import TaskState
 from inspect_ai.util import sandbox
 
-# Metric definitions: (measurement_key, operator, failure_default)
+METRICS_CSV_PATH = "/tmp/metrics.csv"
+
 METRIC_DEFINITIONS = {
     "uplink_throughput_mbps": ("uplink_mbps", ">=", 0.0),
     "downlink_throughput_mbps": ("downlink_mbps", ">=", 0.0),
@@ -23,8 +24,35 @@ METRIC_DEFINITIONS = {
 }
 
 
+async def _read_all_metrics() -> tuple[list[dict], str]:
+    """Read full CSV from UE container. Returns (parsed_rows, raw_csv)."""
+    ue = sandbox("ue")
+    result = await ue.exec(["cat", METRICS_CSV_PATH], timeout=10)
+    if not result.success:
+        return [], ""
+
+    raw_csv = result.stdout
+    rows = []
+    for line in raw_csv.strip().split("\n"):
+        parts = line.split(",")
+        if len(parts) != 5 or parts[0] == "timestamp":
+            continue
+        try:
+            rows.append(
+                {
+                    "timestamp": parts[0],
+                    "throughput_mbps": float(parts[1]),
+                    "latency_ms": float(parts[2]),
+                    "jitter_ms": float(parts[3]),
+                    "packet_loss_pct": float(parts[4]),
+                }
+            )
+        except ValueError:
+            continue
+    return rows, raw_csv
+
+
 async def _check_connectivity() -> tuple[bool, str]:
-    """Check if UE can reach iperf3 server."""
     ue = sandbox("ue")
     result = await ue.exec(
         ["ping", "-c", "3", "-I", "uesimtun0", "iperf3-server"],
@@ -35,70 +63,7 @@ async def _check_connectivity() -> tuple[bool, str]:
     return False, result.stderr or "Ping failed"
 
 
-async def _measure_throughput(direction: str, duration: int = 10) -> tuple[bool, float]:
-    """Run iperf3 throughput test."""
-    ue = sandbox("ue")
-
-    cmd = [
-        "iperf3",
-        "-c",
-        "iperf3-server",
-        "-t",
-        str(duration),
-        "-J",
-        "--bind-dev",
-        "uesimtun0",
-    ]
-    if direction == "downlink":
-        cmd.append("-R")
-
-    result = await ue.exec(cmd, timeout=duration + 30)
-
-    if not result.success:
-        return False, 0.0
-
-    try:
-        data = json.loads(result.stdout)
-        end = data.get("end", {})
-        sum_key = "sum_received" if direction == "downlink" else "sum_sent"
-        bits_per_second = end.get(sum_key, {}).get("bits_per_second", 0)
-        return True, bits_per_second / 1_000_000
-    except (json.JSONDecodeError, KeyError):
-        return False, 0.0
-
-
-async def _measure_latency(count: int = 100) -> tuple[bool, float, float, float]:
-    """Run ping latency test. Returns (success, avg_latency, jitter, loss_pct)."""
-    ue = sandbox("ue")
-
-    result = await ue.exec(
-        ["ping", "-c", str(count), "-I", "uesimtun0", "iperf3-server"],
-        timeout=count + 30,
-    )
-
-    if not result.success:
-        return False, 999.0, 999.0, 100.0
-
-    output = result.stdout
-
-    # Extract packet loss
-    loss_match = re.search(r"(\d+)% packet loss", output)
-    loss_pct = float(loss_match.group(1)) if loss_match else 100.0
-
-    # Extract RTT stats
-    rtt_match = re.search(
-        r"rtt min/avg/max/mdev = ([\d.]+)/([\d.]+)/([\d.]+)/([\d.]+)",
-        output,
-    )
-    if rtt_match:
-        _, avg_rtt, _, mdev = rtt_match.groups()
-        return True, float(avg_rtt), float(mdev), loss_pct
-
-    return False, 999.0, 999.0, loss_pct
-
-
 def _check_threshold(measured: float, operator: str, threshold: float) -> bool:
-    """Check if measured value meets threshold."""
     if operator == ">=":
         return measured >= threshold
     return measured <= threshold
@@ -106,10 +71,9 @@ def _check_threshold(measured: float, operator: str, threshold: float) -> bool:
 
 @scorer(metrics=[mean(), stderr()])
 def sla_compliance_scorer():
-    """Score based on iperf3/ping measurements against SLA from metadata."""
+    """Score based on continuous monitoring CSV against SLA from metadata."""
 
     async def score(state: TaskState, target: Target) -> Score:
-        # Get thresholds from metadata
         expected = state.metadata.get("expected_metrics", {})
         if not expected:
             return Score(
@@ -118,7 +82,6 @@ def sla_compliance_scorer():
                 explanation="Sample metadata must include 'expected_metrics'",
             )
 
-        # Check connectivity first
         connected, msg = await _check_connectivity()
         if not connected:
             return Score(
@@ -127,21 +90,35 @@ def sla_compliance_scorer():
                 explanation=f"UE cannot reach iperf3-server: {msg}",
             )
 
-        # Collect measurements
-        measurements = {}
+        all_rows, raw_csv = await _read_all_metrics()
+        if not all_rows:
+            return Score(
+                value=0.0,
+                answer="No metrics data",
+                explanation="Metrics collector CSV is empty or missing",
+            )
 
-        ul_ok, ul_mbps = await _measure_throughput("uplink")
-        measurements["uplink_mbps"] = ul_mbps if ul_ok else 0.0
+        # Use last 30 seconds for SLA evaluation
+        window = all_rows[-30:] if len(all_rows) >= 30 else all_rows
 
-        dl_ok, dl_mbps = await _measure_throughput("downlink")
-        measurements["downlink_mbps"] = dl_mbps if dl_ok else 0.0
+        throughputs = [r["throughput_mbps"] for r in window]
+        latencies = [r["latency_ms"] for r in window]
+        jitters = [r["jitter_ms"] for r in window]
+        losses = [r["packet_loss_pct"] for r in window]
 
-        lat_ok, latency, jitter, loss = await _measure_latency()
-        measurements["latency_ms"] = latency
-        measurements["jitter_ms"] = jitter
-        measurements["packet_loss_pct"] = loss
+        avg_tp = sum(throughputs) / len(throughputs)
+        avg_lat = sum(latencies) / len(latencies)
+        avg_jit = sum(jitters) / len(jitters)
+        avg_loss = sum(losses) / len(losses)
 
-        # Evaluate against thresholds
+        measurements = {
+            "uplink_mbps": avg_tp,
+            "downlink_mbps": avg_tp,
+            "latency_ms": avg_lat,
+            "jitter_ms": avg_jit,
+            "packet_loss_pct": avg_loss,
+        }
+
         compliance = {}
         for threshold_key, (measurement_key, operator, default) in METRIC_DEFINITIONS.items():
             if threshold_key not in expected:
@@ -150,12 +127,10 @@ def sla_compliance_scorer():
             measured = measurements.get(measurement_key, default)
             compliance[threshold_key] = _check_threshold(measured, operator, threshold)
 
-        # Calculate score
         num_passing = sum(compliance.values())
         total = len(compliance)
         overall_score = num_passing / total if total > 0 else 0.0
 
-        # Build explanation
         lines = []
         for threshold_key, (measurement_key, operator, _) in METRIC_DEFINITIONS.items():
             if threshold_key not in expected:
@@ -164,6 +139,8 @@ def sla_compliance_scorer():
             measured = measurements.get(measurement_key, 0)
             status = "PASS" if compliance.get(threshold_key) else "FAIL"
             lines.append(f"{threshold_key}: {measured:.2f} {operator} {threshold} [{status}]")
+
+        lines.append(f"Evaluation window: last {len(window)}s of {len(all_rows)}s total")
 
         answer = (
             "All SLA requirements satisfied"
@@ -179,6 +156,8 @@ def sla_compliance_scorer():
                 "measurements": measurements,
                 "thresholds": expected,
                 "compliance": compliance,
+                "metrics_csv": raw_csv,
+                "total_samples": len(all_rows),
             },
         )
 

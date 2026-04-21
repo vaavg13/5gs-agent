@@ -1,24 +1,53 @@
-"""Observability tools for network slicing tasks.
+"""Observability tools for intent-driven network slicing tasks.
 
-Metrics collection, performance measurement, and monitoring tools.
+Reads from the background metrics collector CSV rather than running
+ad-hoc iperf3/ping measurements, avoiding iperf3 server contention.
 """
 
 from __future__ import annotations
 
 import json
-import re
 
 from inspect_ai.tool import ToolError, tool
 from inspect_ai.util import sandbox
 
-from ._ue_path import prepare_tunnel_path
+METRICS_CSV_PATH = "/tmp/metrics.csv"
+
+
+async def _read_recent_metrics(
+    ue, n_rows: int = 10
+) -> list[dict[str, float | str]]:
+    result = await ue.exec(
+        ["tail", "-n", str(n_rows), METRICS_CSV_PATH], timeout=5
+    )
+    if not result.success:
+        return []
+    rows = []
+    for line in result.stdout.strip().split("\n"):
+        parts = line.split(",")
+        if len(parts) != 5 or parts[0] == "timestamp":
+            continue
+        try:
+            rows.append(
+                {
+                    "timestamp": parts[0],
+                    "throughput_mbps": float(parts[1]),
+                    "latency_ms": float(parts[2]),
+                    "jitter_ms": float(parts[3]),
+                    "packet_loss_pct": float(parts[4]),
+                }
+            )
+        except ValueError:
+            continue
+    return rows
 
 
 @tool
 def measure_ue_throughput():
-    """Measure UE throughput using iperf3.
+    """Read UE throughput from the continuous monitoring stream.
 
-    Runs iperf3 tests through the 5G data plane (uesimtun0 interface).
+    Returns average throughput over a recent time window from the
+    background iperf3 stream running through the 5G data plane.
     """
 
     async def execute(
@@ -26,165 +55,108 @@ def measure_ue_throughput():
         direction: str = "downlink",
         duration: int = 10,
     ) -> str:
-        """Run iperf3 throughput test.
+        """Read throughput from the monitoring stream.
 
         Args:
-            ue_service: UE container that should run the measurement
-            direction: Test direction ('uplink' or 'downlink')
-            duration: Test duration in seconds (default: 10)
+            ue_service: UE container to read metrics from
+            direction: Reported direction (the stream measures downlink)
+            duration: Number of recent seconds to average over (default: 10)
 
         Returns:
             Throughput measurement results.
         """
-        # Validate direction parameter
-        if not isinstance(direction, str):
-            return f"Invalid direction type: expected string, got {type(direction).__name__}"
-
-        direction = direction.lower().strip()
-        if direction not in ("uplink", "downlink"):
-            return "Invalid direction: must be 'uplink' or 'downlink'"
-
-        # Validate duration parameter
         try:
             duration = int(duration)
         except (ValueError, TypeError):
             return f"Invalid duration value: '{duration}'. Must be a positive integer."
-
-        if duration < 1 or duration > 300:
-            return f"Invalid duration value: {duration}. Must be between 1 and 300."
+        duration = max(1, min(duration, 300))
 
         if not isinstance(ue_service, str) or not ue_service.strip():
             return "Invalid ue_service: must be a non-empty string"
         ue_service = ue_service.strip()
 
         ue = sandbox(ue_service)
-
-        target_ip, tunnel_ip = await prepare_tunnel_path(ue, "iperf3-server")
-
-        ping_result = await ue.exec(
-            ["ping", "-c", "1", "-I", tunnel_ip, target_ip],
-            timeout=10,
-        )
-        if not ping_result.success:
-            raise ToolError("Cannot reach iperf3-server. Check PDU session.")
-
-        # Build iperf3 command
-        cmd = [
-            "iperf3",
-            "-c",
-            target_ip,
-            "-t",
-            str(duration),
-            "-J",  # JSON output
-            "-B",
-            tunnel_ip,
-        ]
-
-        if direction == "uplink":
-            pass  # Default is upload
-        else:
-            cmd.append("-R")  # Reverse mode for download
-
-        result = await ue.exec(cmd, timeout=duration + 30)
-
-        if not result.success:
-            raise ToolError(f"iperf3 failed: {result.stderr}")
-
-        try:
-            data = json.loads(result.stdout)
-            end = data.get("end", {})
-            sum_data = end.get("sum_received" if direction == "downlink" else "sum_sent", {})
-            bits_per_second = sum_data.get("bits_per_second", 0)
-            mbps = bits_per_second / 1_000_000
-
-            return (
-                f"Throughput ({direction}): {mbps:.2f} Mbps\n"
-                f"UE Service: {ue_service}\n"
-                f"Target IP: {target_ip}\n"
-                f"Duration: {duration}s\n"
-                f"Bytes transferred: {sum_data.get('bytes', 0):,}"
+        rows = await _read_recent_metrics(ue, n_rows=duration)
+        if not rows:
+            raise ToolError(
+                f"No metrics available on {ue_service}. "
+                "The monitoring stream may not be running on this UE."
             )
-        except json.JSONDecodeError:
-            return f"Raw output:\n{result.stdout}"
+
+        throughputs = [r["throughput_mbps"] for r in rows]
+        avg = sum(throughputs) / len(throughputs)
+        latest = throughputs[-1]
+
+        return (
+            f"Throughput (downlink, continuous stream): {avg:.2f} Mbps (avg over {len(rows)}s)\n"
+            f"UE Service: {ue_service}\n"
+            f"Latest: {latest:.2f} Mbps\n"
+            f"Min: {min(throughputs):.2f} Mbps\n"
+            f"Max: {max(throughputs):.2f} Mbps\n"
+            f"Window: {rows[0]['timestamp']} to {rows[-1]['timestamp']}"
+        )
 
     return execute
 
 
 @tool
 def measure_ue_latency():
-    """Measure UE latency using ping.
+    """Read UE latency from the continuous monitoring stream.
 
-    Measures RTT, jitter, and packet loss through the 5G data plane.
+    Returns latency, jitter, and packet loss statistics over a recent
+    time window from the background ping running through the 5G data plane.
     """
 
     async def execute(
         ue_service: str = "ue_premium",
         target: str = "iperf3-server",
-        count: int = 100,
+        count: int = 30,
     ) -> str:
-        """Run ping latency test.
+        """Read latency from the monitoring stream.
 
         Args:
-            ue_service: UE container that should run the latency probe
-            target: Target host (default: iperf3-server)
-            count: Number of pings (default: 100)
+            ue_service: UE container to read metrics from
+            target: Informational (monitoring targets iperf3-server)
+            count: Number of recent seconds to average over (default: 30)
 
         Returns:
             Latency statistics.
         """
-        # Validate target parameter
-        if not isinstance(target, str) or not target.strip():
-            return "Invalid target: must be a non-empty string"
-
-        target = target.strip()
-
-        # Validate count parameter
         try:
             count = int(count)
         except (ValueError, TypeError):
             return f"Invalid count value: '{count}'. Must be a positive integer."
-
-        if count < 1 or count > 1000:
-            return f"Invalid count value: {count}. Must be between 1 and 1000."
+        count = max(1, min(count, 1000))
 
         if not isinstance(ue_service, str) or not ue_service.strip():
             return "Invalid ue_service: must be a non-empty string"
         ue_service = ue_service.strip()
 
         ue = sandbox(ue_service)
-        target_ip, tunnel_ip = await prepare_tunnel_path(ue, target)
+        rows = await _read_recent_metrics(ue, n_rows=count)
+        if not rows:
+            raise ToolError(
+                f"No metrics available on {ue_service}. "
+                "The monitoring stream may not be running on this UE."
+            )
 
-        result = await ue.exec(
-            ["ping", "-c", str(count), "-I", tunnel_ip, target_ip],
-            timeout=count + 30,
+        latencies = [r["latency_ms"] for r in rows]
+        jitters = [r["jitter_ms"] for r in rows]
+        losses = [r["packet_loss_pct"] for r in rows]
+
+        avg_lat = sum(latencies) / len(latencies)
+        avg_jit = sum(jitters) / len(jitters)
+        avg_loss = sum(losses) / len(losses)
+
+        return (
+            f"=== Latency Measurement ({ue_service}, continuous stream, {len(rows)}s window) ===\n"
+            f"Latency (avg): {avg_lat:.3f} ms\n"
+            f"Latency (min): {min(latencies):.3f} ms\n"
+            f"Latency (max): {max(latencies):.3f} ms\n"
+            f"Jitter (avg): {avg_jit:.3f} ms\n"
+            f"Packet Loss: {avg_loss:.2f}%\n"
+            f"Window: {rows[0]['timestamp']} to {rows[-1]['timestamp']}"
         )
-
-        if not result.success:
-            raise ToolError(f"Ping failed: {result.stderr or result.stdout}")
-
-        output = result.stdout
-
-        # Parse ping statistics
-        lines = [f"=== Latency Measurement ({ue_service}) ===", f"Target IP: {target_ip}"]
-
-        # Extract packet loss
-        loss_match = re.search(r"(\d+)% packet loss", output)
-        if loss_match:
-            lines.append(f"Packet Loss: {loss_match.group(1)}%")
-
-        # Extract RTT stats (min/avg/max/mdev)
-        rtt_match = re.search(
-            r"rtt min/avg/max/mdev = ([\d.]+)/([\d.]+)/([\d.]+)/([\d.]+)",
-            output,
-        )
-        if rtt_match:
-            min_rtt, avg_rtt, max_rtt, mdev = rtt_match.groups()
-            lines.append(f"Latency (avg): {avg_rtt} ms")
-            lines.append(f"Latency (min): {min_rtt} ms")
-            lines.append(f"Latency (max): {max_rtt} ms")
-            lines.append(f"Jitter (mdev): {mdev} ms")
-
-        return "\n".join(lines)
 
     return execute
 
@@ -211,7 +183,6 @@ def query_prometheus():
             - amf_n1_message_total
             - smf_pdu_session_total
         """
-        # Validate query parameter
         if not isinstance(query, str) or not query.strip():
             return "Invalid query: must be a non-empty PromQL string"
 

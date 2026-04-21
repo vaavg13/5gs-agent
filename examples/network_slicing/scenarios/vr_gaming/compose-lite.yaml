@@ -91,7 +91,7 @@ services:
       start_period: 10s
 
   gnb:
-    image: free5gc/ueransim:v4.2.0-aarch64
+    image: free5gc/ueransim:latest
     container_name: ${COMPOSE_PROJECT_NAME:-open5gs_lite}-gnb
     hostname: gnb
     command: nr-gnb -c /etc/ueransim/gnb.yaml
@@ -107,7 +107,7 @@ services:
         ipv4_address: 10.45.0.20
 
   ue:
-    image: free5gc/ueransim:v4.2.0-aarch64
+    image: free5gc/ueransim:latest
     container_name: ${COMPOSE_PROJECT_NAME:-open5gs_lite}-ue
     hostname: ue
     command: nr-ue -c /etc/ueransim/ue.yaml

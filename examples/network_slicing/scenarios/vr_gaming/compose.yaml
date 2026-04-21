@@ -238,7 +238,7 @@ services:
   # ============ UERANSIM ============
 
   gnb:
-    image: free5gc/ueransim:v4.2.0-aarch64
+    image: free5gc/ueransim:latest
     hostname: gnb
     restart: unless-stopped
     entrypoint: ["/bin/bash", "/scripts/entrypoint-gnb.sh"]
@@ -267,7 +267,7 @@ services:
 
   ue:
     x-default: true
-    image: free5gc/ueransim:v4.2.0-aarch64
+    image: free5gc/ueransim:latest
     hostname: ue
     restart: unless-stopped
     entrypoint: ["/bin/bash", "/scripts/entrypoint-ue.sh"]
