@@ -236,7 +236,13 @@ services:
     image: networkstatic/iperf3:latest
     hostname: iperf3-server
     restart: unless-stopped
-    command: ["-s"]
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        iperf3 -s -p 5201 -D
+        iperf3 -s -p 5202 -D
+        iperf3 -s -p 5203 -D
+        tail -f /dev/null
     networks:
       - open5gs
 

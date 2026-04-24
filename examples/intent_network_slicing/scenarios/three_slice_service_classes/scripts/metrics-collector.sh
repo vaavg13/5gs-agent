@@ -3,11 +3,14 @@
 # Runs iperf3 (throughput) + ping (latency) in parallel, writes CSV.
 # Resilient to tunnel disruptions — waits for interface recovery.
 #
-# Usage: metrics-collector.sh [TARGET] [CSV_PATH] [INTERFACE]
+# Usage: metrics-collector.sh [TARGET] [CSV_PATH] [INTERFACE] [PORT] [BANDWIDTH]
+#   BANDWIDTH: iperf3 -b value (e.g. "0" for unlimited, "10M" for 10 Mbps cap)
 
 TARGET="${1:-iperf3-server}"
 CSV="${2:-/tmp/metrics.csv}"
 IFACE="${3:-uesimtun0}"
+PORT="${4:-5201}"
+BANDWIDTH="${5:-0}"
 
 PING_STATE="/tmp/.ping_state"
 
@@ -51,7 +54,7 @@ PING_PID=$!
 
 while true; do
     wait_for_interface
-    iperf3 -c "$TARGET" -t 86400 -i 1 --forceflush -R --bind-dev "$IFACE" 2>/dev/null | \
+    iperf3 -c "$TARGET" -p "$PORT" -t 30 -i 1 --forceflush --connect-timeout 5000 -R -b "$BANDWIDTH" --bind-dev "$IFACE" 2>/dev/null | \
     while IFS= read -r line; do
         case "$line" in
             *[Bb]its/sec*)
@@ -74,5 +77,4 @@ while true; do
                 ;;
         esac
     done
-    sleep 2
 done

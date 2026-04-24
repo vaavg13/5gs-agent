@@ -65,12 +65,19 @@ def inject_impairments() -> Solver:
     return solve
 
 
+UE_IPERF3_PORTS = {
+    "ue_premium": 5201,
+    "ue_control": 5202,
+    "ue_background": 5203,
+}
+
+
 @solver
 def start_metrics_collector() -> Solver:
-    """Start background metrics collectors in UE containers.
+    """Start background iperf3 + ping collectors in all UE containers.
 
-    Target UE gets iperf3 + ping (full throughput + latency).
-    Other UEs get ping-only (latency/jitter/loss, throughput=0).
+    Each UE connects to its dedicated iperf3 server port so throughput
+    measurements run concurrently without contention.
     """
 
     async def _wait_for_data(ue_sandbox, service_name: str) -> bool:
@@ -91,52 +98,32 @@ def start_metrics_collector() -> Solver:
     async def solve(state: TaskState, generate: Generate) -> TaskState:
         intent = state.metadata.get("intent", {})
         ues = intent.get("ues", [])
+        services = [u["service"] for u in ues] or ["ue_premium"]
         target_services = [u["service"] for u in ues if u.get("role") == "target"]
-        target_svc = target_services[0] if target_services else "ue_premium"
-        other_services = [u["service"] for u in ues if u["service"] != target_svc]
+        target_svc = target_services[0] if target_services else services[0]
 
-        # Start iperf3 + ping on target UE
-        ue = sandbox(target_svc)
-        await ue.exec(
-            [
-                "sh",
-                "-c",
-                "bash /scripts/metrics-collector.sh iperf3-server "
-                f"{METRICS_CSV_PATH} uesimtun0 "
-                "> /tmp/metrics-collector.log 2>&1 &",
-            ],
-            timeout=10,
-        )
-
-        # Start ping-only on other UEs
-        for svc in other_services:
-            other_ue = sandbox(svc)
-            await other_ue.exec(
+        for svc in services:
+            port = UE_IPERF3_PORTS.get(svc, 5201)
+            # Target UE runs unlimited to measure peak; others are capped so
+            # they don't contend with the target on the shared UPF pipe.
+            bandwidth = "0" if svc == target_svc else "10M"
+            ue = sandbox(svc)
+            await ue.exec(
                 [
                     "sh",
                     "-c",
-                    "bash /scripts/ping-collector.sh iperf3-server "
-                    f"{METRICS_CSV_PATH} uesimtun0 "
+                    "bash /scripts/metrics-collector.sh iperf3-server "
+                    f"{METRICS_CSV_PATH} uesimtun0 {port} {bandwidth} "
                     "> /tmp/metrics-collector.log 2>&1 &",
                 ],
                 timeout=10,
             )
-            logger.info(f"Started ping-only collector on {svc}")
+            logger.info(
+                f"Started iperf3+ping collector on {svc} "
+                f"(port {port}, bw {bandwidth})"
+            )
 
-        await _wait_for_data(ue, target_svc)
-        return state
-
-    return solve
-
-
-@solver
-def collect_post_agent_metrics(duration_s: int = 30) -> Solver:
-    """Wait after the agent finishes so the metrics collector accumulates
-    clean post-remediation data for the scorer to evaluate."""
-
-    async def solve(state: TaskState, generate: Generate) -> TaskState:
-        logger.info(f"Collecting post-agent metrics for {duration_s}s")
-        await asyncio.sleep(duration_s)
+        await _wait_for_data(sandbox(target_svc), target_svc)
         return state
 
     return solve

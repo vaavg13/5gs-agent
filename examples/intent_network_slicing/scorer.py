@@ -117,7 +117,7 @@ def sla_compliance_scorer():
             all_rows, raw_csv = await _read_all_metrics(ue_service)
             csv_by_service[ue_service] = raw_csv
 
-            window = all_rows[-15:] if len(all_rows) >= 15 else all_rows
+            window = all_rows[-30:] if len(all_rows) >= 30 else all_rows
             if not window:
                 measurements_by_service[ue_service] = {
                     "uplink_mbps": 0.0,

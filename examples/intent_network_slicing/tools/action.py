@@ -680,6 +680,49 @@ def trigger_ue_registration():
 
 
 @tool
+def sleep_seconds():
+    """Pause for a number of seconds to let network changes stabilize.
+
+    Use this after applying configuration changes before re-measuring —
+    tc rules, re-registrations, and traffic shaping all need time to
+    settle before measurements reflect the new state.
+    """
+
+    async def execute(seconds: int) -> str:
+        """Sleep for a bounded number of seconds.
+
+        Args:
+            seconds: Duration to wait (clamped to 1..60).
+
+        Returns:
+            Confirmation of the elapsed wait.
+        """
+        try:
+            requested = int(seconds)
+        except (TypeError, ValueError):
+            raise ToolError("seconds must be an integer")
+
+        clamped = max(1, min(60, requested))
+        await asyncio.sleep(clamped)
+
+        record_action(
+            tool_name="sleep_seconds",
+            target="agent:wait",
+            parameters={"seconds": clamped},
+            success=True,
+            restart_required=False,
+            risk_class="low",
+            details=f"Waited {clamped}s for changes to stabilize",
+        )
+
+        if clamped != requested:
+            return f"Slept {clamped}s (requested {requested}s, clamped to 1..60)."
+        return f"Slept {clamped}s."
+
+    return execute
+
+
+@tool
 def exec_shell():
     """Execute a shell command in a container.
 

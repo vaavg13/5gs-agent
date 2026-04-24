@@ -26,13 +26,14 @@ from intents import (
     validate_intent,
 )
 from scorer import sla_compliance_scorer
-from solvers import collect_post_agent_metrics, inject_impairments, start_metrics_collector
+from solvers import inject_impairments, start_metrics_collector
 from tools.action import (
     apply_upf_qos_config,
     exec_shell,
     get_upf_qos_config,
     modify_amf_config,
     restart_service,
+    sleep_seconds,
     trigger_ue_registration,
     upsert_nssf_slice,
     upsert_smf_slice,
@@ -84,6 +85,7 @@ Satisfy the formal service intent while minimizing unnecessary changes.
 - update_subscriber_slice: Update subscriber slice and DNN in MongoDB
 - restart_service: Restart network functions after config changes
 - trigger_ue_registration: Re-register UE after changes
+- sleep_seconds: Pause to let changes settle before re-measuring
 - exec_shell: Execute shell commands for advanced operations
 
 ### Measurement (from continuous monitoring stream)
@@ -112,6 +114,18 @@ Satisfy the formal service intent while minimizing unnecessary changes.
 - The iperf3 server is reachable at hostname 'iperf3-server'
 - Start with diagnosis before taking state-changing actions
 - Verify each step before proceeding
+
+## When to Stop
+You control when to exit. Your final measurement window is what gets scored,
+so the last measurements before you stop should reflect a stable, healthy state.
+
+- After applying a change, use `sleep_seconds` (typically 10–20s) to let
+  traffic shaping rules settle and the rolling measurement averages catch up.
+- Then re-measure with `measure_ue_throughput` and `measure_ue_latency`.
+- Exit only once all SLA hard objectives are satisfied in the current window
+  and the readings look stable (not still transitioning).
+- Measurements are rolling averages over recent seconds — fresh changes
+  need time to dominate the window.
 
 Work methodically. Use diagnostic tools to understand current state before making changes.
 """
@@ -251,6 +265,7 @@ def _intent_network_task() -> Task:
                     update_subscriber_slice(),
                     restart_service(),
                     trigger_ue_registration(),
+                    sleep_seconds(),
                     exec_shell(),
                     # Measurement
                     measure_ue_throughput(),
@@ -258,7 +273,6 @@ def _intent_network_task() -> Task:
                     query_prometheus(),
                 ],
             ),
-            collect_post_agent_metrics(),  # 30s of clean post-fix data
         ],
         scorer=sla_compliance_scorer(),
         message_limit=30,
