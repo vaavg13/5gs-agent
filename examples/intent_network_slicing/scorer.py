@@ -60,10 +60,18 @@ async def _read_all_metrics(ue_service: str) -> tuple[list[dict], str]:
     return rows, raw_csv
 
 
+UE_IPERF3_TARGETS = {
+    "ue_premium": "iperf3-premium",
+    "ue_control": "iperf3-control",
+    "ue_background": "iperf3-background",
+}
+
+
 async def _check_connectivity(ue_service: str) -> tuple[bool, str]:
     ue = sandbox(ue_service)
+    target = UE_IPERF3_TARGETS.get(ue_service, "iperf3-premium")
     result = await ue.exec(
-        ["ping", "-c", "3", "-I", "uesimtun0", "iperf3-server"],
+        ["ping", "-c", "3", "-I", "uesimtun0", target],
         timeout=15,
     )
     if result.success:

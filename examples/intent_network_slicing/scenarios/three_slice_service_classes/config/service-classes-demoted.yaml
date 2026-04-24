@@ -1,5 +1,5 @@
 enabled: true
-root_rate: 1000mbit
+root_rate: 2000mbit
 default_rate: 20mbit
 default_ceil: 50mbit
 

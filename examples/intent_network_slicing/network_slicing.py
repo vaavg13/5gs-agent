@@ -111,7 +111,7 @@ Satisfy the formal service intent while minimizing unnecessary changes.
 - This scenario typically exposes `ue_premium`, `ue_control`, and `ue_background`
 - Config changes require service restarts (Open5GS has no hot-reload)
 - S-NSSAI format: `{sst: <int>, sd: "<hex>"}` (e.g., `{sst: 1, sd: "000002"}`)
-- The iperf3 server is reachable at hostname 'iperf3-server'
+- Each UE has its own iperf3 endpoint: `iperf3-premium`, `iperf3-control`, `iperf3-background`
 - Start with diagnosis before taking state-changing actions
 - Verify each step before proceeding
 

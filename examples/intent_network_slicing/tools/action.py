@@ -458,7 +458,14 @@ def restart_service():
 
         service = service.lower().strip()
 
-        valid_services = {"amf", "smf", "upf", "nrf", "gnb", "ue_premium", "ue_background", "ue_control"}
+        valid_services = {"amf", "smf", "nrf", "gnb", "ue_premium", "ue_background", "ue_control"}
+        if service == "upf":
+            return (
+                "UPF restart is not permitted — it disrupts all UE tunnels "
+                "and is not required for any recovery scenario. Use "
+                "apply_upf_qos_config for traffic-shaping changes (takes "
+                "effect immediately, no restart needed)."
+            )
         if service not in valid_services:
             return f"Invalid service: '{service}'. Valid services: {', '.join(sorted(valid_services))}"
 

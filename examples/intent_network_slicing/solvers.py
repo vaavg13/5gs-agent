@@ -65,10 +65,10 @@ def inject_impairments() -> Solver:
     return solve
 
 
-UE_IPERF3_PORTS = {
-    "ue_premium": 5201,
-    "ue_control": 5202,
-    "ue_background": 5203,
+UE_IPERF3_TARGETS = {
+    "ue_premium": "iperf3-premium",
+    "ue_control": "iperf3-control",
+    "ue_background": "iperf3-background",
 }
 
 
@@ -103,25 +103,19 @@ def start_metrics_collector() -> Solver:
         target_svc = target_services[0] if target_services else services[0]
 
         for svc in services:
-            port = UE_IPERF3_PORTS.get(svc, 5201)
-            # Target UE runs unlimited to measure peak; others are capped so
-            # they don't contend with the target on the shared UPF pipe.
-            bandwidth = "0" if svc == target_svc else "10M"
+            target = UE_IPERF3_TARGETS.get(svc, "iperf3-premium")
             ue = sandbox(svc)
             await ue.exec(
                 [
                     "sh",
                     "-c",
-                    "bash /scripts/metrics-collector.sh iperf3-server "
-                    f"{METRICS_CSV_PATH} uesimtun0 {port} {bandwidth} "
+                    f"bash /scripts/metrics-collector.sh {target} "
+                    f"{METRICS_CSV_PATH} uesimtun0 5201 0 "
                     "> /tmp/metrics-collector.log 2>&1 &",
                 ],
                 timeout=10,
             )
-            logger.info(
-                f"Started iperf3+ping collector on {svc} "
-                f"(port {port}, bw {bandwidth})"
-            )
+            logger.info(f"Started iperf3+ping collector on {svc} -> {target}")
 
         await _wait_for_data(sandbox(target_svc), target_svc)
         return state

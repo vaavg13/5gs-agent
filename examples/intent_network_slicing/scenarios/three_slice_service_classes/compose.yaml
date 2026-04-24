@@ -232,17 +232,27 @@ services:
 
   # ============ iperf3 Server ============
 
-  iperf3-server:
+  iperf3-premium:
     image: networkstatic/iperf3:latest
-    hostname: iperf3-server
+    hostname: iperf3-premium
     restart: unless-stopped
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        iperf3 -s -p 5201 -D
-        iperf3 -s -p 5202 -D
-        iperf3 -s -p 5203 -D
-        tail -f /dev/null
+    command: ["-s"]
+    networks:
+      - open5gs
+
+  iperf3-control:
+    image: networkstatic/iperf3:latest
+    hostname: iperf3-control
+    restart: unless-stopped
+    command: ["-s"]
+    networks:
+      - open5gs
+
+  iperf3-background:
+    image: networkstatic/iperf3:latest
+    hostname: iperf3-background
+    restart: unless-stopped
+    command: ["-s"]
     networks:
       - open5gs
 

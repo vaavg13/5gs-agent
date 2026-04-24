@@ -109,14 +109,14 @@ def measure_ue_latency():
 
     async def execute(
         ue_service: str = "ue_premium",
-        target: str = "iperf3-server",
+        target: str = "",
         count: int = 30,
     ) -> str:
         """Read latency from the monitoring stream.
 
         Args:
             ue_service: UE container to read metrics from
-            target: Informational (monitoring targets iperf3-server)
+            target: Informational only (each UE pings its dedicated endpoint)
             count: Number of recent seconds to average over (default: 30)
 
         Returns:

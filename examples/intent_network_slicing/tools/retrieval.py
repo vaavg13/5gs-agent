@@ -468,20 +468,28 @@ def check_connectivity():
     """
 
     async def execute(
-        target: str = "iperf3-server",
+        target: str | None = None,
         count: int = 3,
         ue_service: str = "ue_premium",
     ) -> str:
         """Ping a target from the UE through uesimtun0.
 
         Args:
-            target: Target IP or hostname (default: iperf3-server)
+            target: Target IP or hostname. If omitted, defaults to the
+                    UE's dedicated iperf3 endpoint (iperf3-premium,
+                    iperf3-control, or iperf3-background).
             count: Number of pings (default: 3)
             ue_service: UE container that should originate the ping
 
         Returns:
             Ping results showing connectivity status.
         """
+        if target is None:
+            target = {
+                "ue_premium": "iperf3-premium",
+                "ue_control": "iperf3-control",
+                "ue_background": "iperf3-background",
+            }.get(ue_service, "iperf3-premium")
         # Validate target parameter
         if not isinstance(target, str) or not target.strip():
             return "Invalid target: must be a non-empty string (IP or hostname)"
