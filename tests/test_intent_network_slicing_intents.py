@@ -1,11 +1,11 @@
-"""Tests for the intent schema helpers in the intent-focused example."""
+"""Tests for the intent schema helpers in the intent-focused benchmark."""
 
 import sys
 from pathlib import Path
 
-_EXAMPLES_DIR = Path(__file__).resolve().parents[1] / "examples" / "intent_network_slicing"
-if str(_EXAMPLES_DIR) not in sys.path:
-    sys.path.insert(0, str(_EXAMPLES_DIR))
+_BENCHMARK_DIR = Path(__file__).resolve().parents[1] / "intent_network_slicing"
+if str(_BENCHMARK_DIR) not in sys.path:
+    sys.path.insert(0, str(_BENCHMARK_DIR))
 
 from intents import (
     IntentValidationError,

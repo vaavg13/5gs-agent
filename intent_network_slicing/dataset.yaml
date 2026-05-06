@@ -1,0 +1,263 @@
+# Network Slicing Dataset
+# Intent-driven network slicing dataset
+# Each sample defines a formal service intent plus optional impairments
+
+prompt_template: |
+  Satisfy the service intent using diagnosis before remediation.
+  Prefer the smallest justified change that restores service.
+
+samples:
+  - id: three_slice_service_classes_baseline
+    input: |
+      Confirm the intended multi-UE slice layout is healthy.
+      Diagnose the premium UE first, then verify the protected and background UEs remain connected.
+    target: "Diagnose healthy three-slice state and verify premium intent compliance"
+    sandbox: [open5gs, "three_slice_service_classes/compose.yaml"]
+    intent:
+      service: three_slice_service_classes
+      ues:
+        - ue_id: ue_premium
+          service: ue_premium
+          role: target
+          slice:
+            sst: 1
+            sd: "000002"
+        - ue_id: ue_control
+          service: ue_control
+          role: protected
+          slice:
+            sst: 1
+            sd: "000003"
+        - ue_id: ue_background
+          service: ue_background
+          role: background
+          slice:
+            sst: 1
+            sd: "000001"
+      objectives:
+        hard:
+          - metric: ue_premium.uplink_throughput_mbps
+            op: ">="
+            value: 500
+          - metric: ue_premium.downlink_throughput_mbps
+            op: ">="
+            value: 500
+          - metric: ue_premium.max_latency_ms
+            op: "<="
+            value: 10
+          - metric: ue_premium.max_jitter_ms
+            op: "<="
+            value: 5
+          - metric: ue_premium.max_packet_loss_pct
+            op: "<="
+            value: 0.1
+        soft:
+          - metric: ue_control.max_packet_loss_pct
+            op: "<="
+            value: 1.0
+            weight: 0.2
+          - metric: ue_control.max_latency_ms
+            op: "<="
+            value: 25
+            weight: 0.1
+      control:
+        recovery_deadline_s: 60
+        stability_window_s: 60
+        max_restarts: 0
+      safety:
+        allow_shell: true
+    metadata:
+      difficulty: easy
+
+  - id: three_slice_premium_service_demoted
+    input: |
+      The premium UE's network performance has degraded significantly.
+      Diagnose the root cause and restore the intended service level without disrupting other UEs.
+    target: "Premium UE meets all SLA objectives"
+    sandbox: [open5gs, "three_slice_service_classes/compose.yaml"]
+    intent:
+      service: three_slice_service_classes
+      ues:
+        - ue_id: ue_premium
+          service: ue_premium
+          role: target
+          slice:
+            sst: 1
+            sd: "000002"
+        - ue_id: ue_control
+          service: ue_control
+          role: protected
+          slice:
+            sst: 1
+            sd: "000003"
+        - ue_id: ue_background
+          service: ue_background
+          role: background
+          slice:
+            sst: 1
+            sd: "000001"
+      objectives:
+        hard:
+          - metric: ue_premium.uplink_throughput_mbps
+            op: ">="
+            value: 500
+          - metric: ue_premium.downlink_throughput_mbps
+            op: ">="
+            value: 500
+          - metric: ue_premium.max_latency_ms
+            op: "<="
+            value: 10
+          - metric: ue_premium.max_jitter_ms
+            op: "<="
+            value: 5
+          - metric: ue_premium.max_packet_loss_pct
+            op: "<="
+            value: 0.1
+        soft:
+          - metric: ue_control.max_packet_loss_pct
+            op: "<="
+            value: 1.0
+            weight: 0.2
+          - metric: ue_control.max_latency_ms
+            op: "<="
+            value: 25
+            weight: 0.1
+      control:
+        recovery_deadline_s: 120
+        stability_window_s: 60
+        max_restarts: 1
+      safety:
+        allow_shell: true
+    metadata:
+      difficulty: medium
+    setup:
+      upf: "/scripts/apply-service-class-qos.sh /etc/open5gs/service-classes-demoted.yaml"
+
+  - id: three_slice_premium_lossy
+    input: |
+      Users on the premium UE report intermittent connectivity issues and degraded quality.
+      Investigate the cause and restore stable, high-quality service without disrupting other UEs.
+    target: "Premium UE meets all SLA objectives with stable connectivity"
+    sandbox: [open5gs, "three_slice_service_classes/compose.yaml"]
+    intent:
+      service: three_slice_service_classes
+      ues:
+        - ue_id: ue_premium
+          service: ue_premium
+          role: target
+          slice:
+            sst: 1
+            sd: "000002"
+        - ue_id: ue_control
+          service: ue_control
+          role: protected
+          slice:
+            sst: 1
+            sd: "000003"
+        - ue_id: ue_background
+          service: ue_background
+          role: background
+          slice:
+            sst: 1
+            sd: "000001"
+      objectives:
+        hard:
+          - metric: ue_premium.uplink_throughput_mbps
+            op: ">="
+            value: 500
+          - metric: ue_premium.downlink_throughput_mbps
+            op: ">="
+            value: 500
+          - metric: ue_premium.max_latency_ms
+            op: "<="
+            value: 10
+          - metric: ue_premium.max_jitter_ms
+            op: "<="
+            value: 5
+          - metric: ue_premium.max_packet_loss_pct
+            op: "<="
+            value: 0.1
+        soft:
+          - metric: ue_control.max_packet_loss_pct
+            op: "<="
+            value: 1.0
+            weight: 0.2
+          - metric: ue_control.max_latency_ms
+            op: "<="
+            value: 25
+            weight: 0.1
+      control:
+        recovery_deadline_s: 120
+        stability_window_s: 60
+        max_restarts: 1
+      safety:
+        allow_shell: true
+    metadata:
+      difficulty: medium
+    setup:
+      upf: "/scripts/apply-service-class-qos.sh /etc/open5gs/service-classes-lossy-premium.yaml"
+
+  - id: three_slice_premium_subscriber_misrouted
+    input: |
+      The premium UE is no longer receiving its expected service level despite being connected.
+      Diagnose the issue across all relevant subsystems and restore proper service without disrupting other UEs.
+    target: "Premium UE receives intended service level and all SLA objectives are met"
+    sandbox: [open5gs, "three_slice_service_classes/compose.yaml"]
+    intent:
+      service: three_slice_service_classes
+      ues:
+        - ue_id: ue_premium
+          service: ue_premium
+          role: target
+          slice:
+            sst: 1
+            sd: "000002"
+        - ue_id: ue_control
+          service: ue_control
+          role: protected
+          slice:
+            sst: 1
+            sd: "000003"
+        - ue_id: ue_background
+          service: ue_background
+          role: background
+          slice:
+            sst: 1
+            sd: "000001"
+      objectives:
+        hard:
+          - metric: ue_premium.uplink_throughput_mbps
+            op: ">="
+            value: 500
+          - metric: ue_premium.downlink_throughput_mbps
+            op: ">="
+            value: 500
+          - metric: ue_premium.max_latency_ms
+            op: "<="
+            value: 10
+          - metric: ue_premium.max_jitter_ms
+            op: "<="
+            value: 5
+          - metric: ue_premium.max_packet_loss_pct
+            op: "<="
+            value: 0.1
+        soft:
+          - metric: ue_control.max_packet_loss_pct
+            op: "<="
+            value: 1.0
+            weight: 0.2
+          - metric: ue_control.max_latency_ms
+            op: "<="
+            value: 25
+            weight: 0.1
+      control:
+        recovery_deadline_s: 120
+        stability_window_s: 60
+        max_restarts: 2
+      safety:
+        allow_shell: true
+    metadata:
+      difficulty: hard
+    setup:
+      mongo: "/scripts/set-subscriber-profile.sh 999700000000001 1 000001 background"
+      ue_premium: "pkill -f nr-ue || true"

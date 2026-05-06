@@ -66,3 +66,9 @@ docker-compose.override.yml
 # OS
 .DS_Store
 Thumbs.db
+
+# Claude Code local settings (personal, not committed)
+.claude/ 
+
+# Logs
+logs/
