@@ -1,0 +1,118 @@
+\section{Proof of Concept}
+\label{sec:proof-of-concept}
+
+\subsection{Scope and Experimental Setup}
+\label{subsec:poc-setup}
+
+The service-level intent-assurance loop of Section~4 is instantiated in an
+Open5GS/UERANSIM testbed with three simultaneously active service classes. The
+scenario resembles a small operational network in which not all users have the
+same service contract. One UE represents a premium, latency-sensitive service;
+a second UE represents a protected control service that should not be harmed by
+remediation; and a third UE represents best-effort background traffic. The
+premium service is the target of the intent. Its SLA requires high bidirectional
+throughput, sub-$10$~ms latency, low jitter, and negligible packet loss. The
+control service is monitored as a guardrail, while the background service is
+allowed to receive weaker treatment.
+
+Each UE establishes a real 5G data session through the emulated RAN and the
+Open5GS core. Application traffic is generated against a dedicated
+\texttt{iperf3} endpoint for each service class, so the measurements reflect
+the path through the UE tunnel, gNB, AMF/SMF session control, and UPF
+forwarding policy. The telemetry available to the agent combines service-level
+measurements and network state: rolling throughput, latency, jitter, and loss
+windows; UE registration and tunnel status; network-function logs; subscriber
+records; and relevant Open5GS configuration. The agent can also query these
+signals repeatedly after taking an action, allowing the loop to distinguish
+between a repair that merely changes configuration and a repair that actually
+restores service.
+
+The agent is instructed to diagnose before acting. Its control surface mirrors
+the operations that would be available to a slice operator: inspect subscriber
+profiles, inspect AMF/SMF and UPF configuration, measure the affected UE,
+compare the premium service against the control service, update the UPF QoS
+profile, repair subscriber and slice mappings, restart a network function when
+required, and trigger UE re-registration when a subscriber change must take
+effect. The important point is that the agent is not given the injected fault.
+It receives the live intent, observes symptoms, selects diagnostic checks, and
+then chooses the smallest corrective action that is consistent with the
+evidence.
+
+Service degradation is introduced through three representative fault classes.
+The first demotes the premium service at the UPF, causing premium traffic to be
+treated like background traffic. The second injects packet loss into the
+premium class while leaving the nominal slice assignment unchanged. The third
+alters subscriber state so that the premium UE is effectively associated with
+the wrong service class. These faults exercise different parts of the
+assurance loop. UPF faults are visible as degraded user-plane measurements;
+subscriber faults require correlating service symptoms with control-plane and
+subscriber state. Compliance is computed over the final stabilization window
+from the formal intent objectives, with separate score components for premium
+throughput, latency, jitter, packet loss, and protected-control impact.
+
+\subsection{Results}
+\label{subsec:poc-results}
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\linewidth]{logs/analysis/figures/comparison.pdf}
+    \caption{Per-metric SLA compliance over five repetitions for each fault
+    condition and model ($N=40$ trials). Each stacked segment contributes one
+    sixth of the score; whiskers show the min--max range across trials.}
+    \label{fig:poc-comparison}
+\end{figure}
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\linewidth]{logs/analysis/figures/narrative.pdf}
+    \caption{Temporal recovery trace for a demoted premium slice.
+    The premium latency initially violates the $10$~ms intent, the agent
+    inspects and measures the service, applies the UPF QoS repair, and the
+    final recovery window remains compliant.}
+    \label{fig:poc-recovery-trace}
+\end{figure}
+
+The aggregate compliance results in Fig.~\ref{fig:poc-comparison} indicate
+that SLA restoration is reliable when the impairment is expressed in the UPF
+service-class configuration. \texttt{gpt-5.4} attains full compliance across
+all five baseline, demoted, and lossy repetitions, with mean scores of $1.00$
+in each case. The result is significant because the demoted and lossy cases do
+not simply ask the agent to recognize an alarm; they require it to connect an
+SLA symptom to the data-plane mechanism that can explain it. In successful UPF
+repairs, the agent first verifies that the premium service is degraded, checks
+that the reference service remains stable, inspects or infers the active QoS
+treatment, and then restores the premium profile. The closed loop is completed
+only after the post-action measurements satisfy the original intent.
+
+The only residual failure for \texttt{gpt-5.4} occurs under subscriber
+misrouting, where one trial ends without restored connectivity and the mean
+score decreases to $0.80$. This fault is harder because the visible symptom can
+look like a service-quality problem while the cause is stored in subscriber
+state and may require UE re-registration to become effective. The agent must
+therefore reason across layers: a wrong subscriber association can produce
+missing or degraded connectivity even when the UPF policy itself is healthy.
+
+\texttt{gpt-5.4-mini} maintains full compliance in the healthy baseline and
+subscriber-misrouting runs, but exhibits lower robustness under impaired
+user-plane conditions. Its mean score is $0.80$ for service-class demotion and
+$0.77$ for lossy premium traffic. The failed score components are concentrated
+in premium latency, jitter, and loss, indicating incomplete or delayed
+restoration of the target traffic class rather than a broad control-plane
+failure. The comparison therefore separates two dimensions of capability:
+whether the agent can eventually identify the correct subsystem, and whether it
+can do so consistently within the measurement and stabilization window.
+
+The temporal trace in Fig.~\ref{fig:poc-recovery-trace} illustrates the same
+behavior for a single demoted-slice trial. Before remediation, premium latency
+is close to $35$~ms and exceeds the $10$~ms SLA reference, while the control UE
+remains near its expected low-latency range. This contrast gives the agent a
+useful diagnostic cue: the problem is specific to the premium treatment rather
+than a general collapse of the testbed. The corrective action restores the UPF
+QoS profile associated with the premium class. After the update, premium
+latency falls to approximately $2$--$5$~ms and remains below the SLA threshold
+throughout the recovery window. The absence of a network-function restart
+indicates that the violation can be corrected at the user-plane policy layer
+without disrupting the protected control slice. In operational terms, the
+agent performs the desired assurance behavior: it observes an SLA violation,
+localizes the likely cause, applies a bounded repair, and verifies that the
+declared service intent is again satisfied.

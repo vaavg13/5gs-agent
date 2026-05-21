@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>5GS Experiment Demo</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <h1>5GS Experiment Demo</h1>
+          <p>Launch the Inspect recovery task and watch live UE service metrics.</p>
+        </div>
+        <div class="run-state">
+          <span id="statusDot" class="status-dot"></span>
+          <span id="runStatus">Idle</span>
+        </div>
+      </header>
+
+      <section class="control-band" aria-label="Experiment controls">
+        <label>
+          Scenario
+          <select id="sampleSelect"></select>
+        </label>
+        <label>
+          Model
+          <input id="modelInput" type="text" autocomplete="off" />
+        </label>
+        <div class="button-row">
+          <button id="startButton" class="primary" type="button">Start Run</button>
+          <button id="stopButton" type="button" disabled>Stop</button>
+        </div>
+      </section>
+
+      <section class="summary-grid" aria-label="Run summary">
+        <div class="summary-tile">
+          <span>Phase</span>
+          <strong id="phaseValue">Waiting</strong>
+        </div>
+        <div class="summary-tile">
+          <span>Docker Project</span>
+          <strong id="projectValue">Not attached</strong>
+        </div>
+        <div class="summary-tile">
+          <span>SLA Score</span>
+          <strong id="scoreValue">Pending</strong>
+        </div>
+        <div class="summary-tile">
+          <span>Actions</span>
+          <strong id="actionValue">0</strong>
+        </div>
+      </section>
+
+      <section class="dashboard-grid">
+        <div class="metrics-panel">
+          <div class="panel-header">
+            <h2>Live UE Metrics</h2>
+            <span id="lastMetricUpdate">No collector data yet</span>
+          </div>
+          <div id="ueCards" class="ue-cards"></div>
+        </div>
+
+        <div class="chart-panel">
+          <div class="panel-header">
+            <h2>Premium Throughput</h2>
+            <span>last 90 samples</span>
+          </div>
+          <canvas id="throughputChart" width="860" height="280"></canvas>
+        </div>
+
+        <div class="chart-panel">
+          <div class="panel-header">
+            <h2>Premium Latency & Jitter</h2>
+            <span>milliseconds</span>
+          </div>
+          <canvas id="latencyChart" width="860" height="280"></canvas>
+        </div>
+
+        <div class="timeline-panel">
+          <div class="panel-header">
+            <h2>Agent Timeline</h2>
+            <span id="timelineCount">0 events</span>
+          </div>
+          <div id="timeline" class="timeline"></div>
+        </div>
+
+        <div class="runner-panel">
+          <div class="panel-header">
+            <h2>Runner Output</h2>
+            <span>Inspect process</span>
+          </div>
+          <pre id="runnerOutput"></pre>
+        </div>
+      </section>
+    </main>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
